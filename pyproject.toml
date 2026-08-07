@@ -1,0 +1,13 @@
+[project]
+name = "port-opt"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "lightgbm>=4.7.0",
+    "pandas>=3.0.5",
+    "scikit-learn>=1.9.0",
+    "scipy>=1.18.0",
+    "yfinance>=1.5.2",
+]
