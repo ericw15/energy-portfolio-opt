@@ -1,6 +1,7 @@
 import numpy as np
 from scipy import optimize
 import yfinance as yf
+from typing import List
 
 class Portfolio_Strategy:
     def __init__(self, risk_free_rate:float):
@@ -23,15 +24,15 @@ class Portfolio_Strategy:
         # TODO make this a dictionary mapping or something with the names for readability
         return mins
     
-    def _get_returns(ticker, start_date, end_date):
+    def _get_returns(self, tickers, start_date, end_date):
         # Download historical data
-        data = yf.download(ticker, start=start_date, end=end_date)
+        data = yf.download(tickers=tickers, start=start_date, end=end_date)
         # Calculate daily percentage returns using Adjusted Close
         return data["Close"].pct_change().dropna()
     
     # Should be overridden
     def get_equity_data(self, start_date, end_date, equity_names):
-        return self._get_returns(ticker=equity_names, start_date=start_date,end_date=end_date)
+        return self._get_returns(tickers=equity_names, start_date=start_date,end_date=end_date)
     
     def get_covariance_matrix(start_date, end_date, equity_data):
         raise NotImplementedError
