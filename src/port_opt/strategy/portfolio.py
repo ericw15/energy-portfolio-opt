@@ -3,6 +3,12 @@ from scipy import optimize
 import yfinance as yf
 from typing import List
 
+def get_returns(tickers, start_date, end_date):
+    # Download historical data
+    data = yf.download(tickers=tickers, start=start_date, end=end_date)
+    # Calculate daily percentage returns using Adjusted Close
+    return data["Close"].pct_change().dropna()
+
 class Portfolio_Strategy:
     def __init__(self, risk_free_rate:float):
         """
@@ -11,11 +17,11 @@ class Portfolio_Strategy:
         self.r_free = risk_free_rate
         
 
-    def optimize_towards_sharpe_ratio(covariance_matrix, port_expected_returns, r_free, equity_names:List[str]):
+    def optimize_towards_sharpe_ratio(self, covariance_matrix, port_expected_returns, equity_names:List[str]):
         num_equities = len(equity_names)
         portfolio_variance = lambda x: x.T @ (covariance_matrix.to_numpy() if not isinstance(covariance_matrix, np.ndarray) else covariance_matrix) @ x
         r_portfolio = lambda x: np.dot(x, port_expected_returns)
-        negative_sharpe_ratio = lambda x: (r_portfolio(x) - r_free) / np.sqrt(portfolio_variance(x)) * -1 # we use -1 because we are minimizing
+        negative_sharpe_ratio = lambda x: (r_portfolio(x) - self.r_free) / np.sqrt(portfolio_variance(x)) * -1 # we use -1 because we are minimizing
         equal_weights = np.ones(num_equities) / num_equities # initial guess is that we buy everything equally
         mins = optimize.minimize(negative_sharpe_ratio, 
                                 equal_weights, 
@@ -25,10 +31,7 @@ class Portfolio_Strategy:
         return mins
     
     def _get_returns(self, tickers, start_date, end_date):
-        # Download historical data
-        data = yf.download(tickers=tickers, start=start_date, end=end_date)
-        # Calculate daily percentage returns using Adjusted Close
-        return data["Close"].pct_change().dropna()
+        return get_returns(tickers, start_date, end_date)
     
     # Should be overridden
     def get_equity_data(self, start_date, end_date, equity_names):
