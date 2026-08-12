@@ -1,4 +1,4 @@
-from portfolio import Portfolio_Strategy
+from .portfolio import Portfolio_Strategy
 
 
 class Markowitz_Portfolio(Portfolio_Strategy):
@@ -18,4 +18,6 @@ class Rolling_Markowitz_Portfolio(Markowitz_Portfolio):
         self.rolling_days = rolling_days
 
     def get_expected_returns(self, start_date, end_date, equity_data):
-        return equity_data.rolling(self.rolling_days).mean()
+        if len(equity_data) < self.rolling_days:
+            raise ValueError("equity_data must contain rolling_days observations")
+        return equity_data.iloc[-self.rolling_days :].mean()

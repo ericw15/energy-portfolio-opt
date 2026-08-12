@@ -1,124 +1,203 @@
-from .portfolio import Portfolio_Strategy
-from sklearn.decomposition import PCA
-from sklearn.linear_model import LinearRegression
+from typing import Sequence
+
 import numpy as np
 import pandas as pd
-import lightgbm as lgb
-from sklearn.model_selection import train_test_split
-import seaborn as sns
-import matplotlib.pyplot as plt
+from sklearn.decomposition import PCA
+from sklearn.linear_model import LinearRegression
+
+from .expected_returns import DEFAULT_FEATURE_WINDOWS, get_lightgbm_ER
+from .portfolio import Portfolio_Strategy
 
 
 class PCA_factor_Strategy(Portfolio_Strategy):
-    def __init__(self, risk_free_rate):
+    def __init__(self, risk_free_rate, num_principal_components: int | None = None):
         super().__init__(risk_free_rate)
+        self.num_principal_components = num_principal_components
 
     def get_expected_returns(self, start_date, end_date, equity_data):
-        return equity_data.mean()
+        return equity_data.mean().rename("expected_return")
 
     def get_covariance_matrix(
-        self, start_date, end_date, equity_data, num_principal_components: int = 3
+        self,
+        start_date,
+        end_date,
+        equity_data,
+        num_principal_components: int | None = None,
     ):
-        returns = equity_data
+        returns = equity_data.astype(float)
+        max_components = min(returns.shape)
+        if num_principal_components is None:
+            num_principal_components = self.num_principal_components
+        if num_principal_components is None:
+            num_principal_components = min(3, max_components)
+        if not 1 <= num_principal_components <= max_components:
+            raise ValueError(
+                f"num_principal_components must be between 1 and {max_components}"
+            )
         pca = PCA(n_components=num_principal_components)
-        returns_per_component = pca.fit_transform(returns.to_numpy()).T
+        factor_returns = pca.fit_transform(returns)
 
         lr = LinearRegression()
-        fit_regression_of_betas = lr.fit(returns_per_component.T, returns)
-        predicted_returns = lr.predict(returns_per_component.T)
-        residuals = np.var(predicted_returns - returns, axis=0, ddof=1)
+        lr.fit(factor_returns, returns)
+        predicted_returns = lr.predict(factor_returns)
+        residuals = np.var(predicted_returns - returns.to_numpy(), axis=0, ddof=1)
 
         betas_np = np.array(lr.coef_)
-
-        returns_per_component_dataframe = pd.DataFrame(
-            returns_per_component.T,
-            columns=[f"PC{i}" for i in range(1, 1 + num_principal_components)],
+        factor_covariance = np.cov(factor_returns, rowvar=False, ddof=1)
+        factor_covariance = np.atleast_2d(factor_covariance)
+        asset_covariance_matrix = betas_np @ factor_covariance @ betas_np.T + np.diag(
+            residuals
+        )
+        return pd.DataFrame(
+            asset_covariance_matrix, index=returns.columns, columns=returns.columns
         )
 
-        factor_covariance = returns_per_component_dataframe.cov()  # covariance
 
-        asset_covariance_matrix = (
-            betas_np @ factor_covariance.to_numpy() @ betas_np.T + np.diag(v=residuals)
+class PCA_LightGBM_Strategy(PCA_factor_Strategy):
+    """Original PCA covariance prototype paired with its LightGBM return forecast."""
+
+    def __init__(
+        self,
+        risk_free_rate: float,
+        window_size: int = 30,
+        num_boost_round: int = 100,
+        min_train_samples: int = 20,
+        num_principal_components: int | None = None,
+        feature_windows: Sequence[int] = DEFAULT_FEATURE_WINDOWS,
+    ):
+        super().__init__(risk_free_rate, num_principal_components)
+        self.window_size = window_size
+        self.num_boost_round = num_boost_round
+        self.min_train_samples = min_train_samples
+        self.feature_windows = feature_windows
+
+    def get_expected_returns(self, start_date, end_date, equity_data):
+        return get_lightgbm_ER(
+            equity_data,
+            window_size=self.window_size,
+            num_boost_round=self.num_boost_round,
+            min_train_samples=self.min_train_samples,
+            feature_windows=self.feature_windows,
         )
-        return asset_covariance_matrix
 
 
-def get_lightgbm_ER(
-    equity_data,
-    use_val_for_hyperparameter_optimization: bool = False,
-    window_size: int = 30,
-):
+class PCA_Historical_Mean_Strategy(PCA_factor_Strategy):
+    """PCA covariance paired with full in-sample historical mean returns.
 
-    model_ER_predictions = []
-    for asset in equity_data.columns:
+    The mean-return implementation is inherited from ``PCA_factor_Strategy`` so
+    its asset labels remain aligned with the covariance matrix and return panel.
+    """
 
-        X = np.lib.stride_tricks.sliding_window_view(
-            equity_data[asset], window_shape=window_size
+
+class Commodity_Factor_Strategy(Portfolio_Strategy):
+    """Observed commodity-factor covariance with historical mean returns only."""
+
+    def get_expected_returns(self, start_date, end_date, equity_data):
+        return equity_data.mean().rename("expected_return")
+
+    @staticmethod
+    def _validate_factor_returns(
+        equity_returns: pd.DataFrame, commodity_factor_returns: pd.DataFrame
+    ) -> pd.DataFrame:
+        if not isinstance(commodity_factor_returns, pd.DataFrame):
+            raise TypeError("commodity_factor_returns must be a DataFrame")
+        if commodity_factor_returns.empty:
+            raise ValueError("commodity_factor_returns must not be empty")
+        if not equity_returns.index.equals(commodity_factor_returns.index):
+            raise ValueError(
+                "commodity_factor_returns must have exactly the equity return index"
+            )
+        if commodity_factor_returns.columns.has_duplicates:
+            raise ValueError("commodity_factor_returns must have unique columns")
+        if (
+            commodity_factor_returns.isna().any().any()
+            or not np.isfinite(commodity_factor_returns.to_numpy()).all()
+        ):
+            raise ValueError("commodity_factor_returns must contain only finite values")
+
+        return commodity_factor_returns.astype(float)
+
+    @staticmethod
+    def _factor_model_covariance(
+        equity_returns: pd.DataFrame, factor_returns: pd.DataFrame
+    ) -> pd.DataFrame:
+        returns = equity_returns.astype(float)
+        if (factor_returns.std(ddof=1) == 0).any():
+            raise ValueError("all factors must have non-zero variance")
+        regression = LinearRegression().fit(factor_returns, returns)
+        residuals = returns.to_numpy() - regression.predict(factor_returns)
+        idiosyncratic_variance = residuals.var(axis=0, ddof=1)
+        covariance = (
+            regression.coef_ @ factor_returns.cov().to_numpy() @ regression.coef_.T
+            + np.diag(idiosyncratic_variance)
         )
-        # add mean and variance as features
-        mean = X.mean(axis=1, keepdims=True)
-        var = X.var(axis=1, ddof=1, keepdims=True)
-        X = np.hstack((X, mean, var))
-        y = equity_data[asset][window_size:]
+        covariance = (covariance + covariance.T) / 2.0
+        return pd.DataFrame(covariance, index=returns.columns, columns=returns.columns)
 
-        # we predict, given the last rolling window, the mean return of the next rolling window
-        y_rolling_mean = (
-            y.iloc[::-1].rolling(window=window_size).mean().iloc[::-1].dropna()
-        )  # The mean of next month
-        X = X[: -window_size + 1]
-
-        last_sample = X[-1, :]
-        aligned_X = X[:-1]
-        train_data = lgb.Dataset(aligned_X, label=y_rolling_mean)
-
-        # X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
-
-        # train_data = lgb.Dataset(X_train, label=y_train)
-        # test_data = lgb.Dataset(X_test, label=y_test, reference=train_data)
-
-        params = {
-            "boosting_type": "gbdt",
-            "objective": "regression",
-            "metric": "rmse",
-            "learning_rate": 0.05,
-            "num_leaves": 31,
-            "verbose": -1,
-        }
-
-        # 5. Train the model
-        model = lgb.train(
-            params,
-            train_data,
-            num_boost_round=100,
-            # valid_sets=[test_data],
-            # callbacks=[lgb.early_stopping(stopping_rounds=10)]
+    def get_covariance_matrix_with_factors(
+        self,
+        equity_returns: pd.DataFrame,
+        commodity_factor_returns: pd.DataFrame,
+    ) -> pd.DataFrame:
+        """Estimate covariance using only the observed commodity factors."""
+        factors = self._validate_factor_returns(
+            equity_returns, commodity_factor_returns
         )
-        most_recent_prediction_this_asset = model.predict([last_sample])
-        model_ER_predictions.append(most_recent_prediction_this_asset)
-    return np.array(model_ER_predictions)
+        return self._factor_model_covariance(equity_returns, factors)
+
+    def weights_from_equity_and_factor_returns(
+        self,
+        in_sample_returns: pd.DataFrame,
+        in_sample_factor_returns: pd.DataFrame,
+    ) -> pd.Series:
+        covariance_matrix = self.get_covariance_matrix_with_factors(
+            in_sample_returns, in_sample_factor_returns
+        )
+        expected_returns = self.get_expected_returns(None, None, in_sample_returns)
+        result = self.optimize_towards_sharpe_ratio(
+            covariance_matrix, expected_returns, list(in_sample_returns.columns)
+        )
+        if not result.success:
+            raise RuntimeError(f"portfolio optimization failed: {result.message}")
+        return pd.Series(result.x, index=in_sample_returns.columns, name="weight")
 
 
-if __name__ == "__main__":
-    start = "2024-01-01"
-    end = "2026-01-01"
-    tickers = ["AAPL", "MSFT", "VOO", "LLY", "JPM", "CVX"]
-    pca_factor_strat = PCA_factor_Strategy(0.04 / 252)
-    equity_data = pca_factor_strat.get_equity_data(
-        start_date=start, end_date=end, equity_names=tickers
-    )
-    expected_returns_lgbm = get_lightgbm_ER(equity_data=equity_data)
-    cov_matrix = pca_factor_strat.get_covariance_matrix(
-        start_date=start, end_date=end, equity_data=equity_data
-    )
-    sns.heatmap(
-        cov_matrix,
-        cmap="coolwarm",
-        xticklabels=equity_data.columns,
-        yticklabels=equity_data.columns,
-    )
-    plt.savefig("PCA_factor_covariance.png")
-    portfolio = pca_factor_strat.optimize_towards_sharpe_ratio(
-        cov_matrix, expected_returns_lgbm, equity_names=equity_data.columns
-    )
+class PCA_Commodity_Factor_Strategy(Commodity_Factor_Strategy):
+    """PCA covariance enriched with observed commodity-return factors."""
 
-    breakpoint()
+    def __init__(self, risk_free_rate, num_principal_components: int | None = None):
+        super().__init__(risk_free_rate)
+        self.num_principal_components = num_principal_components
+
+    def get_covariance_matrix_with_factors(
+        self,
+        equity_returns: pd.DataFrame,
+        commodity_factor_returns: pd.DataFrame,
+    ) -> pd.DataFrame:
+        """Estimate covariance from the combined PCA and commodity factor panel."""
+        commodity_factor_returns = self._validate_factor_returns(
+            equity_returns, commodity_factor_returns
+        )
+        returns = equity_returns.astype(float)
+        pca_factor_count = self.num_principal_components
+        if pca_factor_count is None:
+            pca_factor_count = min(3, min(returns.shape))
+        if not 1 <= pca_factor_count <= min(returns.shape):
+            raise ValueError(
+                f"num_principal_components must be between 1 and {min(returns.shape)}"
+            )
+        pca_factors = PCA(n_components=pca_factor_count).fit_transform(returns)
+        factor_returns = pd.concat(
+            [
+                pd.DataFrame(
+                    pca_factors,
+                    index=returns.index,
+                    columns=[
+                        f"pca_factor_{number}" for number in range(pca_factor_count)
+                    ],
+                ),
+                commodity_factor_returns.astype(float),
+            ],
+            axis=1,
+        )
+        return self._factor_model_covariance(returns, factor_returns)

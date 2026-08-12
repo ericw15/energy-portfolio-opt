@@ -1,150 +1,192 @@
-from port_opt.strategy import get_returns
-from port_opt.strategy.PCA_factor import PCA_factor_Strategy, get_lightgbm_ER
+"""Walk-forward portfolio backtesting primitives.
+
+The module deliberately accepts a complete returns panel rather than fetching data.
+This keeps data provenance separate from simulation, makes runs reproducible, and
+allows the same engine to test any return or covariance estimator.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+from typing import Protocol
+
 import numpy as np
-import seaborn as sns
-import matplotlib.pyplot as plt
 import pandas as pd
-from datetime import datetime, timedelta
-
-XLE_TICKERS = [
-    "XOM",
-    "CVX",
-    "COP",
-    "PSX",
-    "MPC",
-    "VLO",
-    "SLB",
-    "EOG",
-    "WMB",
-    "BKR",
-    "KMI",
-    "OXY",
-    "HAL",
-    "FANG",
-    "DVN",
-    "TRGP",
-    "OKE",
-    "APA",
-    "NOV",
-]
 
 
-def get_PCA_factor_portfolio_returns():
-    start = "2024-01-01"
-    end = "2026-01-01"
-    tickers = ["AAPL", "MSFT", "VOO", "LLY", "JPM", "CVX"]
-    pca_factor_strat = PCA_factor_Strategy(0.04 / 252)
-    equity_data = pca_factor_strat.get_equity_data(
-        start_date=start, end_date=end, equity_names=tickers
-    )
-    expected_returns_lgbm = get_lightgbm_ER(equity_data=equity_data)
-    cov_matrix = pca_factor_strat.get_covariance_matrix(
-        start_date=start, end_date=end, equity_data=equity_data
-    )
-    sns.heatmap(
-        cov_matrix,
-        cmap="coolwarm",
-        xticklabels=equity_data.columns,
-        yticklabels=equity_data.columns,
-    )
-    plt.savefig("PCA_factor_covariance.png")
-    portfolio = pca_factor_strat.optimize_towards_sharpe_ratio(
-        cov_matrix, expected_returns_lgbm, equity_names=equity_data.columns
-    )
+class WeightEstimator(Protocol):
+    """Produces target weights using only the supplied in-sample returns."""
+
+    def __call__(self, in_sample_returns: pd.DataFrame) -> pd.Series: ...
 
 
-def main():
+class FactorWeightEstimator(Protocol):
+    """Produces target weights from in-sample asset and observed factor returns."""
 
-    baseline = "XLE"
-    start_training_data = datetime(2023, 1, 1)
-    start = datetime(2024, 1, 1)
-    end = datetime(2026, 1, 1)
+    def __call__(
+        self,
+        in_sample_returns: pd.DataFrame,
+        in_sample_factor_returns: pd.DataFrame,
+    ) -> pd.Series: ...
 
-    baseline_returns = get_returns(tickers=baseline, start_date=start, end_date=end) + 1
-    baseline_portfolio_returns = np.cumprod(baseline_returns)
 
-    equal_weighting = np.full(
-        (baseline_portfolio_returns.size, len(XLE_TICKERS)),
-        fill_value=1 / len(XLE_TICKERS),
-    )
-    xle_individual_asset_returns = get_returns(
-        tickers=XLE_TICKERS, start_date=start, end_date=end
-    )
-    equal_weighting_returns_indiv = (
-        np.sum(xle_individual_asset_returns * equal_weighting, axis=1) + 1
-    )
-    # TODO is this +1 in the right place?
-    equal_weighting_returns = np.cumprod(equal_weighting_returns_indiv)
+@dataclass(frozen=True)
+class RebalanceRecord:
+    """Audit information for one walk-forward rebalance."""
 
-    pca_portfolio_balancing = pd.DataFrame(
-        np.full(equal_weighting.shape, np.nan), index=equal_weighting_returns.index
-    )
+    rebalance_date: pd.Timestamp
+    in_sample_start: pd.Timestamp
+    in_sample_end: pd.Timestamp
+    out_of_sample_start: pd.Timestamp
+    out_of_sample_end: pd.Timestamp
+    weights: pd.Series
 
-    days_step = 30
-    step = timedelta(days=days_step)
-    lgbm_lookback = 30  # this differs because it numbers trading days, not just days
-    current = start
-    previous_portfolio_performance = pd.Series([])
-    while current < end:
-        # This is difficult for two reasons.
-        # 1. trading days differ from calendar, so we have to know what days our strategy is in effect for.
-        # 2. our window size acts on array elements but the timedelta may be different. Somehow these would have to communicate.
-        to_be_replaced = (pca_portfolio_balancing.index >= current) & (
-            pca_portfolio_balancing.index < current + step
-        )  # only get trading days in that period
 
-        current_equity_data = get_returns(
-            tickers=XLE_TICKERS, start_date=start_training_data, end_date=current
+@dataclass(frozen=True)
+class BacktestResult:
+    """Outputs of a backtest, expressed as daily simple returns."""
+
+    portfolio_returns: pd.Series
+    weights: pd.DataFrame
+    records: tuple[RebalanceRecord, ...]
+    turnover: pd.Series
+
+    @property
+    def wealth_index(self) -> pd.Series:
+        """Growth of one unit of capital, before costs."""
+        return (1.0 + self.portfolio_returns).cumprod()
+
+    def sharpe_ratio(
+        self, risk_free_rate: float = 0.0, periods_per_year: int = 252
+    ) -> float:
+        """Annualized Sharpe ratio from daily simple returns.
+
+        ``risk_free_rate`` must use the same (daily) period as the returns.
+        """
+        excess_returns = self.portfolio_returns - risk_free_rate
+        volatility = excess_returns.std(ddof=1)
+        if len(excess_returns) < 2 or np.isclose(volatility, 0.0):
+            return np.nan
+        return float(np.sqrt(periods_per_year) * excess_returns.mean() / volatility)
+
+
+def _validate_returns(returns: pd.DataFrame) -> pd.DataFrame:
+    if not isinstance(returns, pd.DataFrame) or returns.empty:
+        raise ValueError("returns must be a non-empty pandas DataFrame")
+    if not isinstance(returns.index, pd.DatetimeIndex):
+        raise TypeError("returns must have a DatetimeIndex")
+    if not returns.index.is_monotonic_increasing or not returns.index.is_unique:
+        raise ValueError("returns index must be unique and sorted ascending")
+    if returns.columns.has_duplicates:
+        raise ValueError("returns columns must be unique")
+    if returns.isna().any().any() or not np.isfinite(returns.to_numpy()).all():
+        raise ValueError(
+            "returns must contain only finite values; align/drop missing data first"
         )
-        longer_equity_data = get_returns(
-            tickers=XLE_TICKERS, start_date=start_training_data, end_date=current
-        )
-        pca_factor_strat = PCA_factor_Strategy(risk_free_rate=0.04 / 252)
-        expected_returns_lgbm = get_lightgbm_ER(
-            equity_data=longer_equity_data, window_size=lgbm_lookback
-        )
-        cov_matrix = pca_factor_strat.get_covariance_matrix(
-            start_date=start, end_date=current, equity_data=current_equity_data
-        )
-        # sns.heatmap(cov_matrix, cmap="coolwarm", xticklabels=current_equity_data.columns, yticklabels=equity_data.columns)
-        # plt.savefig("PCA_factor_covariance.png")
-        portfolio = pca_factor_strat.optimize_towards_sharpe_ratio(
-            cov_matrix, expected_returns_lgbm, equity_names=current_equity_data.columns
-        )
-        pca_portfolio_balancing[to_be_replaced] = np.tile(
-            portfolio.x, (np.sum(to_be_replaced), 1)
-        )
+    return returns.astype(float)
 
-        if current + step >= end:
-            current = end
+
+def _validate_weights(
+    weights: pd.Series, assets: pd.Index, long_only: bool
+) -> pd.Series:
+    if not isinstance(weights, pd.Series):
+        weights = pd.Series(weights, index=assets, dtype=float)
+    if not weights.index.is_unique:
+        raise ValueError("weight estimator returned duplicate asset labels")
+    if set(weights.index) != set(assets):
+        raise ValueError("weight estimator must return exactly the return-panel assets")
+    weights = weights.reindex(assets).astype(float)
+    if not np.isfinite(weights.to_numpy()).all():
+        raise ValueError("weight estimator returned non-finite weights")
+    if long_only and (weights < -1e-10).any():
+        raise ValueError("long_only backtests do not allow negative weights")
+    if not np.isclose(weights.sum(), 1.0, atol=1e-8):
+        raise ValueError("weights must sum to one")
+    return weights
+
+
+def run_walk_forward_backtest(
+    returns: pd.DataFrame,
+    weight_estimator: WeightEstimator | FactorWeightEstimator,
+    *,
+    lookback_periods: int,
+    rebalance_frequency: int = 21,
+    long_only: bool = True,
+    factor_returns: pd.DataFrame | None = None,
+) -> BacktestResult:
+    """Run a no-look-ahead, periodic-rebalance backtest.
+
+    At each rebalance, the estimator receives the trailing ``lookback_periods``
+    observations that end *before* the first out-of-sample date. Its weights are
+    held for the next ``rebalance_frequency`` available return observations.
+    Frequencies are counts of rows (normally trading days), never calendar days.
+    The first out-of-sample return is therefore the first row following training.
+    When ``factor_returns`` is supplied, it must share the asset panel's exact
+    index and the estimator receives the aligned in-sample factor panel as its
+    second argument. Factors remain observable inputs; they are not holdings.
+    """
+    returns = _validate_returns(returns)
+    if factor_returns is not None:
+        factor_returns = _validate_returns(factor_returns)
+        if not factor_returns.index.equals(returns.index):
+            raise ValueError("factor_returns must have exactly the asset return index")
+    if lookback_periods < 1:
+        raise ValueError("lookback_periods must be positive")
+    if rebalance_frequency < 1:
+        raise ValueError("rebalance_frequency must be positive")
+    if len(returns) <= lookback_periods:
+        raise ValueError("returns must include at least one out-of-sample observation")
+
+    portfolio_parts: list[pd.Series] = []
+    weight_parts: list[pd.DataFrame] = []
+    turnover_parts: list[pd.Series] = []
+    records: list[RebalanceRecord] = []
+    previous_weights: pd.Series | None = None
+
+    for oos_start in range(lookback_periods, len(returns), rebalance_frequency):
+        oos_end = min(oos_start + rebalance_frequency, len(returns))
+        in_sample = returns.iloc[oos_start - lookback_periods : oos_start]
+        holding_returns = returns.iloc[oos_start:oos_end]
+        if factor_returns is None:
+            estimated_weights = weight_estimator(in_sample.copy())
         else:
-            current += step
+            in_sample_factors = factor_returns.iloc[
+                oos_start - lookback_periods : oos_start
+            ]
+            estimated_weights = weight_estimator(
+                in_sample.copy(), in_sample_factors.copy()
+            )
+        weights = _validate_weights(estimated_weights, returns.columns, long_only)
 
-    pca_portfolio_balancing.columns = xle_individual_asset_returns.columns
-    period_performance = np.sum(
-        xle_individual_asset_returns * pca_portfolio_balancing, axis=1
-    )
-    overall_performance = period_performance + 1
-    overall_pca_factor_portfolio_returns = np.cumprod(overall_performance)
-
-    portfolios_return_by_day = {}
-    portfolios_return_by_day["Equal Weighting, Equity"] = (
-        equal_weighting_returns.to_numpy().flatten()
-    )
-    portfolios_return_by_day["Baseline (XLE)"] = (
-        baseline_portfolio_returns.to_numpy().flatten()
-    )
-    portfolios_return_by_day["PCA Factor with LightGBM"] = (
-        overall_pca_factor_portfolio_returns.to_numpy().flatten()
-    )
-    plt.figure(figsize=(12, 6))
-    sns.lineplot(
-        data=pd.DataFrame(
-            portfolios_return_by_day, index=baseline_portfolio_returns.index
+        portfolio_parts.append(holding_returns @ weights)
+        weight_parts.append(
+            pd.DataFrame(
+                np.tile(weights.to_numpy(), (len(holding_returns), 1)),
+                index=holding_returns.index,
+                columns=returns.columns,
+            )
         )
+        turnover = (
+            0.0
+            if previous_weights is None
+            else float((weights - previous_weights).abs().sum() / 2)
+        )
+        turnover_parts.append(pd.Series(turnover, index=[holding_returns.index[0]]))
+        records.append(
+            RebalanceRecord(
+                rebalance_date=holding_returns.index[0],
+                in_sample_start=in_sample.index[0],
+                in_sample_end=in_sample.index[-1],
+                out_of_sample_start=holding_returns.index[0],
+                out_of_sample_end=holding_returns.index[-1],
+                weights=weights.copy(),
+            )
+        )
+        previous_weights = weights
+
+    return BacktestResult(
+        portfolio_returns=pd.concat(portfolio_parts).rename("portfolio_return"),
+        weights=pd.concat(weight_parts),
+        records=tuple(records),
+        turnover=pd.concat(turnover_parts).rename("turnover"),
     )
-    plt.savefig("return_comparison.png")
-
-
-if __name__ == "__main__":
-    main()
