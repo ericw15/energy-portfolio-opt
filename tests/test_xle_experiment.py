@@ -2,7 +2,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from port_opt.backtest import xle_experiment
+from port_opt.backtest import xle_experiment, xle_data
 from port_opt.backtest import save_covariance_comparison, save_return_histograms
 from port_opt.backtest.xle_experiment import (
     save_xle_experiment_visuals,
@@ -50,7 +50,7 @@ def test_xle_data_download_retries_transient_empty_result(monkeypatch):
             index=pd.DatetimeIndex(["2024-01-02"]),
         )
 
-    monkeypatch.setattr(xle_experiment, "get_returns", fake_get_returns)
+    monkeypatch.setattr(xle_data, "get_returns", fake_get_returns)
     downloaded, _ = xle_experiment.load_xle_returns(
         "2024-01-01",
         "2024-01-03",

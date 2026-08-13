@@ -9,7 +9,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-import time
 from typing import Mapping
 
 import matplotlib.pyplot as plt
@@ -20,50 +19,30 @@ from port_opt.strategy import (
     Markowitz_Portfolio,
     PCA_Commodity_Factor_Strategy,
     PCA_Historical_Mean_Strategy,
-    get_returns,
 )
 
-from .backtest import BacktestResult, run_walk_forward_backtest
-from .metrics import summarize_implementation, summarize_performance
+from .backtest import BacktestResult
+from .experiment_core import (
+    ExperimentOutputs,
+    assemble_experiment_outputs,
+    run_labelled_strategies,
+    save_standard_summary_products,
+)
 from .statistics import run_pre_specified_return_comparisons
 from .visualizations import (
     save_covariance_comparison,
-    save_implementation_comparison,
     save_return_histograms,
-    save_risk_return_comparison,
 )
-
-# Original XLE constituent research universe. Review constituent changes before
-# interpreting long-horizon results: this static list can introduce survivorship bias.
-XLE_TICKERS = [
-    "XOM",
-    "CVX",
-    "COP",
-    "PSX",
-    "MPC",
-    "VLO",
-    "SLB",
-    "EOG",
-    "WMB",
-    "BKR",
-    "KMI",
-    "OXY",
-    "HAL",
-    "FANG",
-    "DVN",
-    "TRGP",
-    "OKE",
-    "APA",
-    "NOV",
-]
-BASELINE_TICKER = "XLE"
-DEFAULT_LOOKBACK_PERIODS = 504
-DEFAULT_REBALANCE_FREQUENCY = 21
-DEFAULT_COMMODITY_FACTORS = {
-    "CL=F": "WTI crude oil",
-    "NG=F": "Henry Hub natural gas",
-    "RB=F": "RBOB gasoline",
-}
+from .xle_data import (
+    BASELINE_TICKER,
+    DEFAULT_COMMODITY_FACTORS,
+    DEFAULT_LOOKBACK_PERIODS,
+    DEFAULT_REBALANCE_FREQUENCY,
+    XLE_TICKERS,
+    load_commodity_factor_returns,
+    load_xle_returns,
+    select_backtest_panel,
+)
 
 
 @dataclass(frozen=True)
@@ -84,137 +63,6 @@ class XLEExperimentResult:
     commodity_factor_covariance: pd.DataFrame | None = None
     commodity_only_covariance: pd.DataFrame | None = None
     covariance_as_of_date: pd.Timestamp | None = None
-
-
-def load_xle_returns(
-    start_date: str,
-    end_date: str,
-    *,
-    max_download_attempts: int = 3,
-    retry_delay_seconds: float = 1.0,
-) -> tuple[pd.DataFrame, pd.Series]:
-    """Fetch and align constituent and benchmark daily simple returns once.
-
-    Rows with a missing value for any asset or benchmark are removed deliberately;
-    callers should record this complete-case treatment in research outputs.
-    """
-    if max_download_attempts < 1:
-        raise ValueError("max_download_attempts must be positive")
-    if retry_delay_seconds < 0:
-        raise ValueError("retry_delay_seconds cannot be negative")
-
-    last_error: Exception | None = None
-    for attempt in range(max_download_attempts):
-        try:
-            downloaded_returns = get_returns(
-                [*XLE_TICKERS, BASELINE_TICKER],
-                start_date=start_date,
-                end_date=end_date,
-            )
-            if not downloaded_returns.empty:
-                break
-            last_error = ValueError("provider returned no observations")
-        except Exception as error:
-            last_error = error
-        if attempt + 1 < max_download_attempts:
-            time.sleep(retry_delay_seconds * (2**attempt))
-    else:
-        raise RuntimeError(
-            f"unable to download non-empty returns after {max_download_attempts} attempts"
-        ) from last_error
-    aligned_returns = downloaded_returns.dropna(how="any")
-    asset_returns = aligned_returns.loc[:, XLE_TICKERS]
-    baseline_returns = aligned_returns[BASELINE_TICKER]
-    if asset_returns.empty:
-        raise ValueError(
-            "no complete XLE constituent return observations were downloaded"
-        )
-    return asset_returns, baseline_returns
-
-
-def load_commodity_factor_returns(
-    start_date: str,
-    end_date: str,
-    *,
-    commodity_factors: Mapping[str, str] = DEFAULT_COMMODITY_FACTORS,
-    max_download_attempts: int = 3,
-    retry_delay_seconds: float = 1.0,
-) -> pd.DataFrame:
-    """Fetch complete-case U.S.-traded commodity factor returns.
-
-    Mapping keys are provider tickers and mapping values are stable research
-    factor labels. The function deliberately returns daily simple returns, not
-    price levels, because the covariance model uses factor returns.
-    """
-    if not commodity_factors:
-        raise ValueError("commodity_factors must not be empty")
-    if len(set(commodity_factors)) != len(commodity_factors) or len(
-        set(commodity_factors.values())
-    ) != len(commodity_factors):
-        raise ValueError("commodity factor tickers and labels must be unique")
-    if max_download_attempts < 1:
-        raise ValueError("max_download_attempts must be positive")
-    if retry_delay_seconds < 0:
-        raise ValueError("retry_delay_seconds cannot be negative")
-
-    last_error: Exception | None = None
-    for attempt in range(max_download_attempts):
-        try:
-            downloaded_returns = get_returns(
-                list(commodity_factors), start_date=start_date, end_date=end_date
-            )
-            if not downloaded_returns.empty:
-                break
-            last_error = ValueError("provider returned no commodity observations")
-        except Exception as error:
-            last_error = error
-        if attempt + 1 < max_download_attempts:
-            time.sleep(retry_delay_seconds * (2**attempt))
-    else:
-        raise RuntimeError(
-            "unable to download non-empty commodity returns after "
-            f"{max_download_attempts} attempts"
-        ) from last_error
-
-    factor_returns = downloaded_returns.loc[:, list(commodity_factors)].dropna(
-        how="any"
-    )
-    if factor_returns.empty:
-        raise ValueError(
-            "no complete commodity factor return observations were downloaded"
-        )
-    return factor_returns.rename(columns=commodity_factors)
-
-
-def select_backtest_panel(
-    asset_returns: pd.DataFrame,
-    backtest_start: str,
-    lookback_periods: int,
-) -> tuple[pd.DataFrame, int]:
-    """Select prior observations and return the effective lookback length.
-
-    The requested rolling lookback is a research choice and is never silently
-    shortened when data is unavailable.
-    """
-    requested_start = pd.Timestamp(backtest_start)
-    start_position = asset_returns.index.searchsorted(requested_start)
-    if start_position >= len(asset_returns):
-        raise ValueError("backtest_start falls after the available return observations")
-    available_history = start_position
-    if available_history < 1:
-        raise ValueError(
-            "at least one return observation is required before backtest_start"
-        )
-    if lookback_periods < 1:
-        raise ValueError("lookback_periods must be positive")
-    if lookback_periods > available_history:
-        raise ValueError(
-            "lookback_periods exceeds the observations available before backtest_start"
-        )
-    return (
-        asset_returns.iloc[start_position - lookback_periods :],
-        lookback_periods,
-    )
 
 
 def run_xle_pca_historical_mean_experiment(
@@ -278,40 +126,33 @@ def run_xle_pca_historical_mean_experiment(
         num_principal_components=num_principal_components,
     )
     commodity_only_strategy = Commodity_Factor_Strategy(risk_free_rate=risk_free_rate)
-    strategy_backtest = run_walk_forward_backtest(
+    strategy_backtests = run_labelled_strategies(
         backtest_panel,
-        strategy.weights_from_returns,
+        {
+            "PCA factor / Historical Means Sharpe": strategy.weights_from_returns,
+            "PCA + U.S. commodity factors / Historical Means Sharpe": (
+                lambda in_sample: commodity_strategy.weights_from_equity_and_factor_returns(
+                    in_sample, backtest_commodity_panel.loc[in_sample.index]
+                )
+            ),
+            "U.S. commodity factors only / Historical Means Sharpe": (
+                lambda in_sample: commodity_only_strategy.weights_from_equity_and_factor_returns(
+                    in_sample, backtest_commodity_panel.loc[in_sample.index]
+                )
+            ),
+            "Markowitz / Historical Means Sharpe": markowitz_strategy.weights_from_returns,
+        },
         lookback_periods=effective_lookback,
         rebalance_frequency=rebalance_frequency,
     )
-    markowitz_backtest = run_walk_forward_backtest(
-        backtest_panel,
-        markowitz_strategy.weights_from_returns,
-        lookback_periods=effective_lookback,
-        rebalance_frequency=rebalance_frequency,
-    )
-    commodity_factor_backtest = run_walk_forward_backtest(
-        backtest_panel,
-        commodity_strategy.weights_from_equity_and_factor_returns,
-        lookback_periods=effective_lookback,
-        rebalance_frequency=rebalance_frequency,
-        factor_returns=backtest_commodity_panel,
-    )
-    commodity_only_backtest = run_walk_forward_backtest(
-        backtest_panel,
-        commodity_only_strategy.weights_from_equity_and_factor_returns,
-        lookback_periods=effective_lookback,
-        rebalance_frequency=rebalance_frequency,
-        factor_returns=backtest_commodity_panel,
-    )
-
-    evaluation_index = strategy_backtest.portfolio_returns.index
-    if not (
-        evaluation_index.equals(markowitz_backtest.portfolio_returns.index)
-        and evaluation_index.equals(commodity_factor_backtest.portfolio_returns.index)
-        and evaluation_index.equals(commodity_only_backtest.portfolio_returns.index)
-    ):
-        raise RuntimeError("covariance strategies produced different backtest dates")
+    strategy_backtest = strategy_backtests["PCA factor / Historical Means Sharpe"]
+    commodity_factor_backtest = strategy_backtests[
+        "PCA + U.S. commodity factors / Historical Means Sharpe"
+    ]
+    commodity_only_backtest = strategy_backtests[
+        "U.S. commodity factors only / Historical Means Sharpe"
+    ]
+    markowitz_backtest = strategy_backtests["Markowitz / Historical Means Sharpe"]
     if covariance_rebalance_index < 0:
         raise ValueError("covariance_rebalance_index must be non-negative")
     try:
@@ -323,34 +164,14 @@ def run_xle_pca_historical_mean_experiment(
     covariance_returns = backtest_panel.loc[
         covariance_record.in_sample_start : covariance_record.in_sample_end
     ]
-    daily_returns = pd.DataFrame(
-        {
-            "PCA factor / Historical Means Sharpe": strategy_backtest.portfolio_returns,
-            "PCA + U.S. commodity factors / Historical Means Sharpe": (
-                commodity_factor_backtest.portfolio_returns
-            ),
-            "U.S. commodity factors only / Historical Means Sharpe": (
-                commodity_only_backtest.portfolio_returns
-            ),
-            "Markowitz / Historical Means Sharpe": markowitz_backtest.portfolio_returns,
-            "Equal-weight XLE constituents": asset_returns.loc[evaluation_index].mean(
-                axis=1
-            ),
-            "XLE baseline": baseline_returns.loc[evaluation_index],
-        }
+    outputs = assemble_experiment_outputs(
+        strategy_backtests,
+        asset_returns,
+        baseline_returns,
+        risk_free_rate=risk_free_rate,
     )
-    strategy_backtests = {
-        "PCA factor / Historical Means Sharpe": strategy_backtest,
-        "PCA + U.S. commodity factors / Historical Means Sharpe": (
-            commodity_factor_backtest
-        ),
-        "U.S. commodity factors only / Historical Means Sharpe": (
-            commodity_only_backtest
-        ),
-        "Markowitz / Historical Means Sharpe": markowitz_backtest,
-    }
     statistical_tests = run_pre_specified_return_comparisons(
-        daily_returns,
+        outputs.daily_returns,
         {
             "PCA + commodity factors versus PCA": (
                 "PCA + U.S. commodity factors / Historical Means Sharpe",
@@ -360,12 +181,10 @@ def run_xle_pca_historical_mean_experiment(
         hac_lag=hac_lag,
     )
     return XLEExperimentResult(
-        daily_returns=daily_returns,
-        cumulative_returns=(1.0 + daily_returns).cumprod(),
-        performance_metrics=summarize_performance(
-            daily_returns, risk_free_rate=risk_free_rate
-        ),
-        implementation_metrics=summarize_implementation(strategy_backtests),
+        daily_returns=outputs.daily_returns,
+        cumulative_returns=outputs.cumulative_returns,
+        performance_metrics=outputs.performance_metrics,
+        implementation_metrics=outputs.implementation_metrics,
         statistical_tests=statistical_tests,
         strategy_backtest=strategy_backtest,
         markowitz_backtest=markowitz_backtest,
@@ -424,8 +243,6 @@ def save_xle_experiment_visuals(
         / "commodity-covariance-comparison.png",
         "commodity_only_covariance_comparison": output_directory
         / "commodity-only-covariance-comparison.png",
-        "risk_return_comparison": output_directory / "risk-return-comparison.png",
-        "implementation_comparison": output_directory / "implementation-comparison.png",
     }
     save_growth_chart(result, paths["growth_comparison"])
     save_covariance_comparison(
@@ -451,16 +268,26 @@ def save_xle_experiment_visuals(
     histogram_paths = save_return_histograms(
         result.daily_returns, output_directory / "return-histograms"
     )
-    save_risk_return_comparison(
-        result.performance_metrics, paths["risk_return_comparison"]
+    strategy_backtests = {
+        "PCA factor / Historical Means Sharpe": result.strategy_backtest,
+        "PCA + U.S. commodity factors / Historical Means Sharpe": result.commodity_factor_backtest,
+        "U.S. commodity factors only / Historical Means Sharpe": result.commodity_only_backtest,
+        "Markowitz / Historical Means Sharpe": result.markowitz_backtest,
+    }
+    if any(backtest is None for backtest in strategy_backtests.values()):
+        raise ValueError("result has incomplete historical-mean strategy backtests")
+    summary_outputs = ExperimentOutputs(
+        daily_returns=result.daily_returns,
+        cumulative_returns=result.cumulative_returns,
+        performance_metrics=result.performance_metrics,
+        implementation_metrics=result.implementation_metrics,
+        strategy_backtests={
+            label: backtest
+            for label, backtest in strategy_backtests.items()
+            if backtest is not None
+        },
     )
-    save_implementation_comparison(
-        result.implementation_metrics, paths["implementation_comparison"]
-    )
-    paths["performance_metrics"] = output_directory / "performance-metrics.csv"
-    paths["implementation_metrics"] = output_directory / "implementation-metrics.csv"
-    result.performance_metrics.to_csv(paths["performance_metrics"])
-    result.implementation_metrics.to_csv(paths["implementation_metrics"])
+    paths.update(save_standard_summary_products(summary_outputs, output_directory))
     if result.statistical_tests is not None:
         paths["statistical_tests"] = output_directory / "statistical-tests.csv"
         result.statistical_tests.to_csv(paths["statistical_tests"])

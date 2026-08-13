@@ -366,8 +366,9 @@ def run_covariance_estimator_study(
 
 
 if __name__ == "__main__":
-    from port_opt.backtest.xle_experiment import XLE_TICKERS
     from port_opt.strategy import get_returns
+
+    from .xle_data import XLE_TICKERS
 
     returns = get_returns(XLE_TICKERS, start_date="2018-01-01", end_date="2021-01-01")
     results = run_covariance_estimator_study(

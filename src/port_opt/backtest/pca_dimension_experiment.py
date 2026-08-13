@@ -16,10 +16,14 @@ import pandas as pd
 
 from port_opt.strategy import PCA_Historical_Mean_Strategy
 
-from .backtest import BacktestResult, run_walk_forward_backtest
-from .metrics import summarize_implementation, summarize_performance
-from .visualizations import save_implementation_comparison, save_risk_return_comparison
-from .xle_experiment import (
+from .backtest import BacktestResult
+from .experiment_core import (
+    ExperimentOutputs,
+    assemble_experiment_outputs,
+    run_labelled_strategies,
+    save_standard_summary_products,
+)
+from .xle_data import (
     BASELINE_TICKER,
     DEFAULT_LOOKBACK_PERIODS,
     DEFAULT_REBALANCE_FREQUENCY,
@@ -101,40 +105,26 @@ def run_xle_pca_dimension_experiment(
         )
         for component_count in component_grid
     }
-    strategy_backtests = {
-        label: run_walk_forward_backtest(
-            backtest_panel,
-            strategy.weights_from_returns,
-            lookback_periods=effective_lookback,
-            rebalance_frequency=rebalance_frequency,
-        )
-        for label, strategy in strategies.items()
-    }
-    evaluation_index = next(iter(strategy_backtests.values())).portfolio_returns.index
-    if not all(
-        evaluation_index.equals(backtest.portfolio_returns.index)
-        for backtest in strategy_backtests.values()
-    ):
-        raise RuntimeError("PCA component strategies produced different backtest dates")
-    daily_returns = pd.DataFrame(
+    strategy_backtests = run_labelled_strategies(
+        backtest_panel,
         {
-            **{
-                label: backtest.portfolio_returns
-                for label, backtest in strategy_backtests.items()
-            },
-            "Equal-weight XLE constituents": asset_returns.loc[evaluation_index].mean(
-                axis=1
-            ),
-            "XLE baseline": baseline_returns.loc[evaluation_index],
-        }
+            label: strategy.weights_from_returns
+            for label, strategy in strategies.items()
+        },
+        lookback_periods=effective_lookback,
+        rebalance_frequency=rebalance_frequency,
+    )
+    outputs = assemble_experiment_outputs(
+        strategy_backtests,
+        asset_returns,
+        baseline_returns,
+        risk_free_rate=risk_free_rate,
     )
     return XLEPCADimensionExperimentResult(
-        daily_returns=daily_returns,
-        cumulative_returns=(1.0 + daily_returns).cumprod(),
-        performance_metrics=summarize_performance(
-            daily_returns, risk_free_rate=risk_free_rate
-        ),
-        implementation_metrics=summarize_implementation(strategy_backtests),
+        daily_returns=outputs.daily_returns,
+        cumulative_returns=outputs.cumulative_returns,
+        performance_metrics=outputs.performance_metrics,
+        implementation_metrics=outputs.implementation_metrics,
         strategy_backtests=strategy_backtests,
     )
 
@@ -163,20 +153,20 @@ def save_xle_pca_dimension_experiment_visuals(
     output_directory.mkdir(parents=True, exist_ok=True)
     paths = {
         "growth_comparison": output_directory / "growth-comparison.png",
-        "risk_return_comparison": output_directory / "risk-return-comparison.png",
-        "implementation_comparison": output_directory / "implementation-comparison.png",
-        "performance_metrics": output_directory / "performance-metrics.csv",
-        "implementation_metrics": output_directory / "implementation-metrics.csv",
     }
     save_xle_pca_dimension_growth_chart(result, paths["growth_comparison"])
-    save_risk_return_comparison(
-        result.performance_metrics, paths["risk_return_comparison"]
+    paths.update(
+        save_standard_summary_products(
+            ExperimentOutputs(
+                daily_returns=result.daily_returns,
+                cumulative_returns=result.cumulative_returns,
+                performance_metrics=result.performance_metrics,
+                implementation_metrics=result.implementation_metrics,
+                strategy_backtests=result.strategy_backtests,
+            ),
+            output_directory,
+        )
     )
-    save_implementation_comparison(
-        result.implementation_metrics, paths["implementation_comparison"]
-    )
-    result.performance_metrics.to_csv(paths["performance_metrics"])
-    result.implementation_metrics.to_csv(paths["implementation_metrics"])
     return paths
 
 

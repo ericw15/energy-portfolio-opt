@@ -5,6 +5,39 @@ portfolios with stated baselines. Historical data acquisition, return/covariance
 estimation, portfolio construction, and walk-forward evaluation are intentionally
 separate so that a research result can swap one component without changing the rest.
 
+## Running experiments
+
+Use the single command-line launch point for every research theme. Each
+subcommand has the documented defaults, and every parameter can be overridden
+without editing source code:
+
+```bash
+uv run python -m port_opt.backtest.cli factor
+uv run python -m port_opt.backtest.cli covariance --ewma-half-life 63
+uv run python -m port_opt.backtest.cli tail-risk --tail-loss-weight 1
+uv run python -m port_opt.backtest.cli pca-dimension --components 1,2,3,4,5
+```
+
+`all` runs all four with their own defaults and writes to one directory tree:
+
+```bash
+uv run python -m port_opt.backtest.cli all --output-directory research_outputs
+```
+
+In particular, `all` preserves the PCA-dimension experiment's separate
+development period rather than applying the 2024 onward final-evaluation dates
+to every theme.
+
+## Research package layout
+
+- `backtest/xle_data.py` defines the static XLE universe, data loading,
+  complete-case alignment, and rolling-panel selection shared by all themes.
+- `backtest/experiment_core.py` runs labelled strategies under the common
+  walk-forward protocol, validates their shared out-of-sample dates, adds the
+  two baselines, and writes the standard summary products.
+- The four experiment modules contain only their research-specific strategy
+  maps, diagnostics, and pre-specified statistical comparisons.
+
 ## Current backtesting contract
 
 `port_opt.backtest.run_walk_forward_backtest` accepts a clean daily return panel
@@ -301,7 +334,6 @@ from port_opt.backtest.xle_experiment import (
 
 experiment = run_xle_pca_historical_mean_experiment(
     num_principal_components=3,
-    ewma_half_life=63,
     covariance_rebalance_index=0,
 )
 save_xle_experiment_visuals(experiment, "research_outputs")
