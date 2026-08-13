@@ -4,6 +4,9 @@ import pytest
 
 from port_opt.backtest import run_walk_forward_backtest
 from port_opt.strategy import (
+    EWMA_Portfolio,
+    EWMAPCA_Historical_Mean_Strategy,
+    Ledoit_Wolf_Portfolio,
     Markowitz_Portfolio,
     PCA_Historical_Mean_Strategy,
     PCA_Commodity_Factor_Strategy,
@@ -11,6 +14,7 @@ from port_opt.strategy import (
     PCA_LightGBM_Strategy,
     PCA_factor_Strategy,
     Rolling_Markowitz_Portfolio,
+    TailAdjustedSharpePCA_Historical_Mean_Strategy,
     get_lightgbm_ER,
 )
 
@@ -47,6 +51,95 @@ def test_rolling_markowitz_uses_only_its_last_rolling_window(returns):
     pd.testing.assert_series_equal(
         strategy.get_expected_returns(None, None, returns), expected
     )
+
+
+def test_shrinkage_and_ewma_covariance_preserve_asset_labels(returns):
+    ledoit_wolf_covariance = Ledoit_Wolf_Portfolio(0.0).get_covariance_matrix(
+        None, None, returns
+    )
+    ewma_covariance = EWMA_Portfolio(0.0, half_life=5).get_covariance_matrix(
+        None, None, returns
+    )
+
+    for covariance in (ledoit_wolf_covariance, ewma_covariance):
+        assert covariance.index.tolist() == returns.columns.tolist()
+        assert covariance.columns.tolist() == returns.columns.tolist()
+        assert np.allclose(covariance, covariance.T)
+
+
+def test_ewma_pca_covariance_preserves_asset_labels(returns):
+    ewma_pca_covariance = EWMAPCA_Historical_Mean_Strategy(
+        0.0, half_life=5, num_principal_components=2
+    ).get_covariance_matrix(None, None, returns)
+
+    assert ewma_pca_covariance.index.tolist() == returns.columns.tolist()
+    assert ewma_pca_covariance.columns.tolist() == returns.columns.tolist()
+    assert np.allclose(ewma_pca_covariance, ewma_pca_covariance.T)
+    assert np.linalg.eigvalsh(ewma_pca_covariance).min() >= -1e-12
+
+
+def test_portfolio_cvar_uses_tail_dates_of_the_weighted_portfolio():
+    returns = pd.DataFrame(
+        {
+            "A": [-0.10, 0.02, 0.01, 0.00],
+            "B": [0.10, -0.02, -0.01, 0.00],
+        }
+    )
+
+    cvar = Markowitz_Portfolio(0.0).get_cvar_percentile(
+        pd.Series({"B": 0.5, "A": 0.5}), returns, cvar_percentile=0.5
+    )
+
+    # The combined portfolio returns are [0, 0, 0, 0], not the average of the
+    # assets' separate tail averages.
+    assert cvar == pytest.approx(0.0)
+
+
+@pytest.mark.parametrize("percentile", [0.0, 1.0, -0.1])
+def test_portfolio_cvar_rejects_invalid_percentile(percentile):
+    returns = pd.DataFrame({"A": [-0.01, 0.01], "B": [0.01, -0.01]})
+
+    with pytest.raises(ValueError, match="cvar_percentile"):
+        Markowitz_Portfolio(0.0).get_cvar_percentile(
+            pd.Series({"A": 0.5, "B": 0.5}), returns, percentile
+        )
+
+
+def test_tail_adjusted_pca_strategy_is_a_walk_forward_weight_estimator(returns):
+    strategy = TailAdjustedSharpePCA_Historical_Mean_Strategy(
+        risk_free_rate=0.0,
+        tail_loss_weight=1.0,
+        cvar_percentile=0.95,
+        num_principal_components=2,
+    )
+    result = run_walk_forward_backtest(
+        returns,
+        strategy.weights_from_returns,
+        lookback_periods=120,
+        rebalance_frequency=10,
+    )
+
+    assert len(result.records) == 4
+    assert result.weights.columns.tolist() == returns.columns.tolist()
+    assert np.allclose(result.weights.sum(axis=1), 1.0)
+
+
+def test_tail_adjusted_sharpe_does_not_treat_positive_tail_return_as_risk():
+    strategy = Markowitz_Portfolio(0.0)
+    returns = pd.DataFrame({"A": [0.01, 0.02, 0.03], "B": [0.02, 0.03, 0.04]})
+    covariance = returns.cov()
+    expected_returns = returns.mean()
+
+    result = strategy.optimize_towards_tail_adjusted_sharpe_ratio(
+        covariance,
+        expected_returns,
+        returns,
+        list(returns.columns),
+        tail_loss_weight=1.0,
+        cvar_percentile=0.95,
+    )
+
+    assert result.success
 
 
 def test_pca_covariance_preserves_asset_labels_and_is_symmetric(returns):

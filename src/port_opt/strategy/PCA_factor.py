@@ -89,6 +89,100 @@ class PCA_Historical_Mean_Strategy(PCA_factor_Strategy):
     """
 
 
+class TailAdjustedSharpePCA_Historical_Mean_Strategy(PCA_Historical_Mean_Strategy):
+    """PCA covariance with historical means and empirical tail-loss penalty."""
+
+    def __init__(
+        self,
+        risk_free_rate: float,
+        tail_loss_weight: float = 1.0,
+        cvar_percentile: float = 0.95,
+        num_principal_components: int | None = None,
+    ):
+        super().__init__(risk_free_rate, num_principal_components)
+        if tail_loss_weight < 0:
+            raise ValueError("tail_loss_weight cannot be negative")
+        if not 0.0 < cvar_percentile < 1.0:
+            raise ValueError("cvar_percentile must be between zero and one")
+        self.tail_loss_weight = tail_loss_weight
+        self.cvar_percentile = cvar_percentile
+
+    def weights_from_returns(self, in_sample_returns: pd.DataFrame) -> pd.Series:
+        covariance_matrix = self.get_covariance_matrix(None, None, in_sample_returns)
+        expected_returns = self.get_expected_returns(None, None, in_sample_returns)
+        result = self.optimize_towards_tail_adjusted_sharpe_ratio(
+            covariance_matrix,
+            expected_returns,
+            in_sample_returns,
+            list(in_sample_returns.columns),
+            tail_loss_weight=self.tail_loss_weight,
+            cvar_percentile=self.cvar_percentile,
+        )
+        if not result.success:
+            raise RuntimeError(f"portfolio optimization failed: {result.message}")
+        return pd.Series(result.x, index=in_sample_returns.columns, name="weight")
+
+
+class EWMAPCA_Historical_Mean_Strategy(PCA_Historical_Mean_Strategy):
+    """Historical-mean portfolio with an exponentially weighted PCA covariance.
+
+    Principal directions, factor variances, and residual variances are all fit
+    using the same recency weights. This differs from merely applying EWMA to a
+    PCA covariance estimated with equally weighted observations.
+    """
+
+    def __init__(
+        self,
+        risk_free_rate: float,
+        half_life: int = 63,
+        num_principal_components: int | None = None,
+    ):
+        super().__init__(risk_free_rate, num_principal_components)
+        if half_life < 1:
+            raise ValueError("half_life must be positive")
+        self.half_life = half_life
+
+    def get_covariance_matrix(
+        self,
+        start_date,
+        end_date,
+        equity_data,
+        num_principal_components: int | None = None,
+    ):
+        returns = equity_data.astype(float)
+        max_components = min(returns.shape)
+        component_count = (
+            self.num_principal_components
+            if num_principal_components is None
+            else num_principal_components
+        )
+        if component_count is None:
+            component_count = min(3, max_components)
+        if not 1 <= component_count <= max_components:
+            raise ValueError(
+                f"num_principal_components must be between 1 and {max_components}"
+            )
+
+        ages = np.arange(len(returns) - 1, -1, -1)
+        weights = np.exp(np.log(0.5) * ages / self.half_life)
+        weights /= weights.sum()
+        centered_returns = returns.to_numpy() - weights @ returns.to_numpy()
+        weighted_covariance = (centered_returns * weights[:, None]).T @ centered_returns
+        eigenvalues, eigenvectors = np.linalg.eigh(weighted_covariance)
+        order = np.argsort(eigenvalues)[::-1]
+        eigenvalues = eigenvalues[order]
+        eigenvectors = eigenvectors[:, order]
+        loadings = eigenvectors[:, :component_count]
+        systematic_covariance = (
+            loadings @ np.diag(eigenvalues[:component_count]) @ loadings.T
+        )
+        residual_variances = np.clip(
+            np.diag(weighted_covariance - systematic_covariance), 0.0, None
+        )
+        covariance = systematic_covariance + np.diag(residual_variances)
+        return pd.DataFrame(covariance, index=returns.columns, columns=returns.columns)
+
+
 class Commodity_Factor_Strategy(Portfolio_Strategy):
     """Observed commodity-factor covariance with historical mean returns only."""
 

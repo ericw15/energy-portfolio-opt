@@ -38,9 +38,9 @@ def save_covariance_comparison(
 ) -> None:
     """Save side-by-side covariance heatmaps on one comparable color scale.
 
-    Both heatmaps share one symmetric color scale, making their cell magnitudes
-    directly comparable. ``as_of_date`` is a display label; callers determine
-    the return history used to estimate each matrix.
+    Both heatmaps share one common color scale, making their displayed cell
+    magnitudes directly comparable. ``as_of_date`` is a display label; callers
+    determine the return history used to estimate each matrix.
     """
     _validate_covariance_pair(pca_covariance, comparison_covariance)
     output_path = Path(output_path)
@@ -51,9 +51,9 @@ def save_covariance_comparison(
         np.abs(comparison_covariance.to_numpy()).max(),
     )
     minimum_absolute_covariance = min(
-            np.abs(pca_covariance.to_numpy()).min(),
-            np.abs(comparison_covariance.to_numpy()).min(),
-        )
+        np.abs(pca_covariance.to_numpy()).min(),
+        np.abs(comparison_covariance.to_numpy()).min(),
+    )
     figure, axes = plt.subplots(1, 2, figsize=(18, 8), constrained_layout=True)
     date_label = (
         "" if as_of_date is None else f" as of {pd.Timestamp(as_of_date):%Y-%m-%d}"
@@ -85,6 +85,134 @@ def save_covariance_comparison(
 def _filename_component(label: str) -> str:
     component = re.sub(r"[^a-z0-9]+", "-", label.lower()).strip("-")
     return component or "series"
+
+
+_RISK_RETURN_METRICS = (
+    ("annualized_geometric_return", "Annualized geometric return", "higher is better"),
+    ("annualized_volatility", "Annualized volatility", "lower is better"),
+    ("sharpe_ratio", "Sharpe ratio", "higher is better"),
+    ("sortino_ratio", "Sortino ratio", "higher is better"),
+    ("maximum_drawdown", "Maximum drawdown", "less negative is better"),
+    (
+        "tail_expected_shortfall_5pct",
+        "5% expected shortfall",
+        "less negative is better",
+    ),
+)
+_IMPLEMENTATION_METRICS = (
+    ("annualized_turnover", "Annualized target turnover"),
+    ("mean_max_weight", "Mean maximum weight"),
+    ("mean_effective_number_assets", "Mean effective number of assets"),
+)
+
+
+def _validate_metric_table(
+    metrics: pd.DataFrame, required_columns: tuple[str, ...]
+) -> pd.DataFrame:
+    if not isinstance(metrics, pd.DataFrame) or metrics.empty:
+        raise ValueError("metrics must be a non-empty DataFrame")
+    missing_columns = set(required_columns).difference(metrics.columns)
+    if missing_columns:
+        raise ValueError(
+            f"metrics are missing required columns: {sorted(missing_columns)}"
+        )
+    selected = metrics.loc[:, required_columns]
+    if not np.isfinite(selected.to_numpy(dtype=float)).all():
+        raise ValueError("metrics must contain only finite values")
+    return selected
+
+
+def _bar_colors(labels: pd.Index) -> list[tuple[float, ...]]:
+    palette = plt.get_cmap("tab10")
+    return [palette(position % palette.N) for position in range(len(labels))]
+
+
+def save_risk_return_comparison(
+    performance_metrics: pd.DataFrame, output_path: str | Path
+) -> None:
+    """Save six complementary out-of-sample risk/return bar comparisons.
+
+    All series, including baselines, appear in every panel. The figure keeps
+    growth separate and concentrates on annualized return, ordinary and downside
+    risk-adjusted return, volatility, drawdown, and empirical daily tail loss.
+    """
+    metric_names = tuple(metric[0] for metric in _RISK_RETURN_METRICS)
+    metrics = _validate_metric_table(performance_metrics, metric_names)
+    labels = metrics.index
+    positions = np.arange(len(labels))
+    colors = _bar_colors(labels)
+    figure, axes = plt.subplots(2, 3, figsize=(20, 10), constrained_layout=True)
+    for axis, (metric, title, direction) in zip(
+        axes.flat, _RISK_RETURN_METRICS, strict=True
+    ):
+        values = metrics[metric]
+        axis.bar(positions, values, color=colors)
+        axis.axhline(0.0, color="black", linewidth=0.8)
+        axis.set_title(f"{title} ({direction})")
+        axis.set_xticks(positions, labels, rotation=32, ha="right", fontsize=8)
+        if metric in {"sharpe_ratio", "sortino_ratio"}:
+            axis.set_ylabel("Ratio")
+            value_format = ".2f"
+        else:
+            axis.set_ylabel("Decimal return" if "assets" not in metric else "Assets")
+            axis.yaxis.set_major_formatter("{x:.0%}")
+            value_format = ".1%"
+        for position, value in enumerate(values):
+            axis.annotate(
+                format(value, value_format),
+                (position, value),
+                xytext=(0, 3 if value >= 0 else -12),
+                textcoords="offset points",
+                ha="center",
+                va="bottom" if value >= 0 else "top",
+                fontsize=7,
+            )
+    output_path = Path(output_path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    figure.savefig(output_path, dpi=180, bbox_inches="tight")
+    plt.close(figure)
+
+
+def save_implementation_comparison(
+    implementation_metrics: pd.DataFrame, output_path: str | Path
+) -> None:
+    """Save compact turnover, concentration, and diversification comparisons."""
+    metric_names = tuple(metric[0] for metric in _IMPLEMENTATION_METRICS)
+    metrics = _validate_metric_table(implementation_metrics, metric_names)
+    labels = metrics.index
+    positions = np.arange(len(labels))
+    colors = _bar_colors(labels)
+    figure, axes = plt.subplots(1, 3, figsize=(18, 5.5), constrained_layout=True)
+    for axis, (metric, title) in zip(axes, _IMPLEMENTATION_METRICS, strict=True):
+        values = metrics[metric]
+        axis.bar(positions, values, color=colors)
+        axis.set_title(title)
+        axis.set_xticks(positions, labels, rotation=32, ha="right", fontsize=8)
+        if metric in {"annualized_turnover", "mean_max_weight"}:
+            axis.yaxis.set_major_formatter("{x:.0%}")
+            axis.set_ylabel(
+                "Target weight turnover"
+                if metric == "annualized_turnover"
+                else "Weight"
+            )
+            value_format = ".1%"
+        else:
+            axis.set_ylabel("Assets")
+            value_format = ".2f"
+        for position, value in enumerate(values):
+            axis.annotate(
+                format(value, value_format),
+                (position, value),
+                xytext=(0, 3),
+                textcoords="offset points",
+                ha="center",
+                va="bottom",
+                fontsize=7,
+            )
+    output_path = Path(output_path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    figure.savefig(output_path, dpi=180, bbox_inches="tight")
+    plt.close(figure)
 
 
 def save_return_histograms(

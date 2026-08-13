@@ -25,7 +25,14 @@ from port_opt.strategy import (
 )
 
 from .backtest import BacktestResult, run_walk_forward_backtest
-from .visualizations import save_covariance_comparison, save_return_histograms
+from .metrics import summarize_implementation, summarize_performance
+from .statistics import run_pre_specified_return_comparisons
+from .visualizations import (
+    save_covariance_comparison,
+    save_implementation_comparison,
+    save_return_histograms,
+    save_risk_return_comparison,
+)
 
 # Original XLE constituent research universe. Review constituent changes before
 # interpreting long-horizon results: this static list can introduce survivorship bias.
@@ -66,7 +73,10 @@ class XLEExperimentResult:
 
     daily_returns: pd.DataFrame
     cumulative_returns: pd.DataFrame
+    performance_metrics: pd.DataFrame
+    implementation_metrics: pd.DataFrame
     strategy_backtest: BacktestResult
+    statistical_tests: pd.DataFrame | None = None
     markowitz_backtest: BacktestResult | None = None
     commodity_factor_backtest: BacktestResult | None = None
     commodity_only_backtest: BacktestResult | None = None
@@ -258,6 +268,12 @@ def run_xle_pca_lightgbm_experiment(
     return XLEExperimentResult(
         daily_returns=daily_returns,
         cumulative_returns=(1.0 + daily_returns).cumprod(),
+        performance_metrics=summarize_performance(
+            daily_returns, risk_free_rate=risk_free_rate
+        ),
+        implementation_metrics=summarize_implementation(
+            {"PCA factor + LightGBM": strategy_backtest}
+        ),
         strategy_backtest=strategy_backtest,
     )
 
@@ -275,8 +291,9 @@ def run_xle_pca_historical_mean_experiment(
     commodity_factors: Mapping[str, str] = DEFAULT_COMMODITY_FACTORS,
     max_download_attempts: int = 3,
     retry_delay_seconds: float = 1.0,
+    hac_lag: int = 20,
 ) -> XLEExperimentResult:
-    """Compare PCA and sample-covariance Markowitz with historical means.
+    """Compare covariance estimators with shared historical-mean returns.
 
     All portfolio strategies receive the same trailing observations at each
     rebalance and retain historical-mean expected returns. They differ only in
@@ -383,9 +400,34 @@ def run_xle_pca_historical_mean_experiment(
             "XLE baseline": baseline_returns.loc[evaluation_index],
         }
     )
+    strategy_backtests = {
+        "PCA factor / Historical Means Sharpe": strategy_backtest,
+        "PCA + U.S. commodity factors / Historical Means Sharpe": (
+            commodity_factor_backtest
+        ),
+        "U.S. commodity factors only / Historical Means Sharpe": (
+            commodity_only_backtest
+        ),
+        "Markowitz / Historical Means Sharpe": markowitz_backtest,
+    }
+    statistical_tests = run_pre_specified_return_comparisons(
+        daily_returns,
+        {
+            "PCA + commodity factors versus PCA": (
+                "PCA + U.S. commodity factors / Historical Means Sharpe",
+                "PCA factor / Historical Means Sharpe",
+            )
+        },
+        hac_lag=hac_lag,
+    )
     return XLEExperimentResult(
         daily_returns=daily_returns,
         cumulative_returns=(1.0 + daily_returns).cumprod(),
+        performance_metrics=summarize_performance(
+            daily_returns, risk_free_rate=risk_free_rate
+        ),
+        implementation_metrics=summarize_implementation(strategy_backtests),
+        statistical_tests=statistical_tests,
         strategy_backtest=strategy_backtest,
         markowitz_backtest=markowitz_backtest,
         commodity_factor_backtest=commodity_factor_backtest,
@@ -430,7 +472,7 @@ def save_xle_experiment_visuals(
         or result.covariance_as_of_date is None
     ):
         raise ValueError(
-            "result has no PCA/Markowitz covariance diagnostics; "
+            "result has incomplete covariance diagnostics; "
             "run the historical-mean experiment first"
         )
     output_directory = Path(output_directory)
@@ -443,6 +485,8 @@ def save_xle_experiment_visuals(
         / "commodity-covariance-comparison.png",
         "commodity_only_covariance_comparison": output_directory
         / "commodity-only-covariance-comparison.png",
+        "risk_return_comparison": output_directory / "risk-return-comparison.png",
+        "implementation_comparison": output_directory / "implementation-comparison.png",
     }
     save_growth_chart(result, paths["growth_comparison"])
     save_covariance_comparison(
@@ -468,6 +512,19 @@ def save_xle_experiment_visuals(
     histogram_paths = save_return_histograms(
         result.daily_returns, output_directory / "return-histograms"
     )
+    save_risk_return_comparison(
+        result.performance_metrics, paths["risk_return_comparison"]
+    )
+    save_implementation_comparison(
+        result.implementation_metrics, paths["implementation_comparison"]
+    )
+    paths["performance_metrics"] = output_directory / "performance-metrics.csv"
+    paths["implementation_metrics"] = output_directory / "implementation-metrics.csv"
+    result.performance_metrics.to_csv(paths["performance_metrics"])
+    result.implementation_metrics.to_csv(paths["implementation_metrics"])
+    if result.statistical_tests is not None:
+        paths["statistical_tests"] = output_directory / "statistical-tests.csv"
+        result.statistical_tests.to_csv(paths["statistical_tests"])
     return {
         **paths,
         **{f"histogram:{label}": path for label, path in histogram_paths.items()},
@@ -478,14 +535,9 @@ if __name__ == "__main__":
     experiment = run_xle_pca_historical_mean_experiment(num_principal_components=1)
     visual_paths = save_xle_experiment_visuals(experiment, "research_outputs")
     print(experiment.cumulative_returns.tail())
+    print("Performance metrics:")
+    print(experiment.performance_metrics)
+    print("Implementation metrics:")
+    print(experiment.implementation_metrics)
     print("Visual outputs:")
     print(*visual_paths.values(), sep="\n")
-    print(
-        "PCA factor / Historical Mean Sharpe:",
-        experiment.strategy_backtest.sharpe_ratio(risk_free_rate=0.04 / 252),
-    )
-    if experiment.markowitz_backtest is not None:
-        print(
-            "Markowitz / Historical Mean Sharpe:",
-            experiment.markowitz_backtest.sharpe_ratio(risk_free_rate=0.04 / 252),
-        )

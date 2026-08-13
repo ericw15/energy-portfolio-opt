@@ -100,9 +100,18 @@ def test_historical_mean_experiment_compares_pca_and_markowitz(monkeypatch, tmp_
         lookback_periods=30,
         rebalance_frequency=10,
         num_principal_components=2,
+        hac_lag=5,
     )
 
     assert result.markowitz_backtest is not None
+    assert result.statistical_tests is not None
+    assert result.statistical_tests.index.tolist() == [
+        "PCA + commodity factors versus PCA"
+    ]
+    assert (
+        result.statistical_tests.loc["PCA + commodity factors versus PCA", "hac_lag"]
+        == 5
+    )
     assert result.commodity_factor_backtest is not None
     assert result.commodity_only_backtest is not None
     assert result.daily_returns.columns.tolist() == [
@@ -113,6 +122,31 @@ def test_historical_mean_experiment_compares_pca_and_markowitz(monkeypatch, tmp_
         "Equal-weight XLE constituents",
         "XLE baseline",
     ]
+    assert (
+        result.performance_metrics.index.tolist()
+        == result.daily_returns.columns.tolist()
+    )
+    assert set(result.performance_metrics.columns) == {
+        "observations",
+        "cumulative_return",
+        "mean_daily_return",
+        "annualized_arithmetic_return",
+        "annualized_geometric_return",
+        "annualized_volatility",
+        "sharpe_ratio",
+        "sortino_ratio",
+        "maximum_drawdown",
+        "worst_daily_return",
+        "positive_day_fraction",
+        "tail_return_quantile_5pct",
+        "tail_expected_shortfall_5pct",
+    }
+    assert result.implementation_metrics.index.tolist() == [
+        "PCA factor / Historical Means Sharpe",
+        "PCA + U.S. commodity factors / Historical Means Sharpe",
+        "U.S. commodity factors only / Historical Means Sharpe",
+        "Markowitz / Historical Means Sharpe",
+    ]
     assert result.strategy_backtest.portfolio_returns.index.equals(
         result.markowitz_backtest.portfolio_returns.index
     )
@@ -122,6 +156,11 @@ def test_historical_mean_experiment_compares_pca_and_markowitz(monkeypatch, tmp_
         "markowitz_covariance_comparison",
         "commodity_covariance_comparison",
         "commodity_only_covariance_comparison",
+        "risk_return_comparison",
+        "implementation_comparison",
+        "performance_metrics",
+        "implementation_metrics",
+        "statistical_tests",
         "histogram:PCA factor / Historical Means Sharpe",
         "histogram:PCA + U.S. commodity factors / Historical Means Sharpe",
         "histogram:U.S. commodity factors only / Historical Means Sharpe",
