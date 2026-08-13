@@ -41,7 +41,6 @@ def test_covariance_experiment_runs_all_estimators_and_only_writes_growth(
     assert result.daily_returns.columns.tolist() == [
         "Markowitz sample covariance / Historical Means Sharpe",
         "PCA covariance / Historical Means Sharpe",
-        "Ledoit-Wolf covariance / Historical Means Sharpe",
         "EWMA covariance (63-day half-life) / Historical Means Sharpe",
         "EWMA-PCA covariance (63-day half-life) / Historical Means Sharpe",
         "Equal-weight XLE constituents",
@@ -51,7 +50,7 @@ def test_covariance_experiment_runs_all_estimators_and_only_writes_growth(
         result.performance_metrics.index.tolist()
         == result.daily_returns.columns.tolist()
     )
-    assert len(result.implementation_metrics) == 5
+    assert len(result.implementation_metrics) == 4
     assert result.statistical_tests.index.tolist() == [
         "EWMA-PCA covariance versus PCA covariance"
     ]

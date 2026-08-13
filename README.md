@@ -68,8 +68,8 @@ commodity-price exposure.
 
 [`covariance_experiment.py`](src/port_opt/backtest/covariance_experiment.py)
 is a separate main experiment for the covariance question. It compares sample
-covariance Markowitz, ordinary PCA covariance, Ledoit--Wolf covariance, EWMA
-covariance and EWMA-PCA covariance, alongside the
+covariance Markowitz, ordinary PCA covariance, EWMA covariance and EWMA-PCA
+covariance, alongside the
 equal-weight constituent and XLE baselines. Expected returns, long-only
 maximum-Sharpe construction, estimation windows, and rebalance dates are held
 identical across every optimized strategy.
@@ -141,9 +141,9 @@ uv run python -m port_opt.backtest.pca_dimension_experiment
 `run_covariance_estimator_study` is deliberately separate from the XLE
 experiment. Supply an earlier development-only return panel—never the final
 portfolio evaluation period—and it compares rolling forecasts from sample
-covariance, Ledoit--Wolf shrinkage, EWMA covariance over a fixed half-life grid,
-and PCA covariance. If an exactly date-aligned factor-return panel is supplied,
-it also evaluates PCA-plus-factor covariance.
+covariance, EWMA covariance over a fixed half-life grid, and PCA covariance. If
+an exactly date-aligned factor-return panel is supplied, it also evaluates
+PCA-plus-factor covariance.
 
 At every rebalance each candidate fits to the same prior window. The primary,
 presentation-first comparison holds a fixed equal-weight portfolio over the

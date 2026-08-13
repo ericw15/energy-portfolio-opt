@@ -6,16 +6,13 @@ from port_opt.backtest import run_walk_forward_backtest
 from port_opt.strategy import (
     EWMA_Portfolio,
     EWMAPCA_Historical_Mean_Strategy,
-    Ledoit_Wolf_Portfolio,
     Markowitz_Portfolio,
     PCA_Historical_Mean_Strategy,
     PCA_Commodity_Factor_Strategy,
     Commodity_Factor_Strategy,
-    PCA_LightGBM_Strategy,
     PCA_factor_Strategy,
     Rolling_Markowitz_Portfolio,
     TailAdjustedSharpePCA_Historical_Mean_Strategy,
-    get_lightgbm_ER,
 )
 
 
@@ -53,18 +50,14 @@ def test_rolling_markowitz_uses_only_its_last_rolling_window(returns):
     )
 
 
-def test_shrinkage_and_ewma_covariance_preserve_asset_labels(returns):
-    ledoit_wolf_covariance = Ledoit_Wolf_Portfolio(0.0).get_covariance_matrix(
-        None, None, returns
-    )
+def test_ewma_covariance_preserves_asset_labels(returns):
     ewma_covariance = EWMA_Portfolio(0.0, half_life=5).get_covariance_matrix(
         None, None, returns
     )
 
-    for covariance in (ledoit_wolf_covariance, ewma_covariance):
-        assert covariance.index.tolist() == returns.columns.tolist()
-        assert covariance.columns.tolist() == returns.columns.tolist()
-        assert np.allclose(covariance, covariance.T)
+    assert ewma_covariance.index.tolist() == returns.columns.tolist()
+    assert ewma_covariance.columns.tolist() == returns.columns.tolist()
+    assert np.allclose(ewma_covariance, ewma_covariance.T)
 
 
 def test_ewma_pca_covariance_preserves_asset_labels(returns):
@@ -215,33 +208,6 @@ def test_commodity_only_factor_covariance_preserves_asset_labels(returns):
     assert covariance.columns.tolist() == returns.columns.tolist()
     assert np.allclose(covariance, covariance.T)
     assert len(result.records) == 4
-
-
-def test_lightgbm_forecast_is_labelled_and_pca_lightgbm_backtests(returns):
-    forecasts = get_lightgbm_ER(
-        returns, window_size=5, min_train_samples=10, num_boost_round=1
-    )
-    assert forecasts.index.tolist() == returns.columns.tolist()
-    assert np.isfinite(forecasts).all()
-
-    strategy = PCA_LightGBM_Strategy(
-        risk_free_rate=0.0,
-        window_size=5,
-        min_train_samples=10,
-        num_boost_round=1,
-    )
-    result = run_walk_forward_backtest(
-        returns,
-        strategy.weights_from_returns,
-        lookback_periods=120,
-        rebalance_frequency=10,
-    )
-    assert len(result.records) == 4
-
-
-def test_lightgbm_rejects_insufficient_history(returns):
-    with pytest.raises(ValueError, match="too short"):
-        get_lightgbm_ER(returns.iloc[:18], window_size=5, min_train_samples=10)
 
 
 def test_expected_return_study_uses_a_purged_chronological_holdout():

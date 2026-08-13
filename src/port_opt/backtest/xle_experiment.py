@@ -20,7 +20,6 @@ from port_opt.strategy import (
     Markowitz_Portfolio,
     PCA_Commodity_Factor_Strategy,
     PCA_Historical_Mean_Strategy,
-    PCA_LightGBM_Strategy,
     get_returns,
 )
 
@@ -215,66 +214,6 @@ def select_backtest_panel(
     return (
         asset_returns.iloc[start_position - lookback_periods :],
         lookback_periods,
-    )
-
-
-def run_xle_pca_lightgbm_experiment(
-    *,
-    training_start: str = "2021-01-01",
-    backtest_start: str = "2024-01-01",
-    end_date: str = "2026-01-01",
-    lookback_periods: int = DEFAULT_LOOKBACK_PERIODS,
-    rebalance_frequency: int = DEFAULT_REBALANCE_FREQUENCY,
-    risk_free_rate: float = 0.04 / 252,
-    lightgbm_window_size: int = 30,
-    lightgbm_num_boost_round: int = 100,
-    max_download_attempts: int = 3,
-    retry_delay_seconds: float = 1.0,
-) -> XLEExperimentResult:
-    """Run the forward-looking rolling-window energy strategy and baselines."""
-    asset_returns, baseline_returns = load_xle_returns(
-        training_start,
-        end_date,
-        max_download_attempts=max_download_attempts,
-        retry_delay_seconds=retry_delay_seconds,
-    )
-    # Pass the selected prior history to the generic engine so its first OOS
-    # observation is backtest_start (or the next available trading observation).
-    backtest_panel, effective_lookback = select_backtest_panel(
-        asset_returns, backtest_start, lookback_periods
-    )
-    strategy = PCA_LightGBM_Strategy(
-        risk_free_rate=risk_free_rate,
-        window_size=lightgbm_window_size,
-        num_boost_round=lightgbm_num_boost_round,
-    )
-    strategy_backtest = run_walk_forward_backtest(
-        backtest_panel,
-        strategy.weights_from_returns,
-        lookback_periods=effective_lookback,
-        rebalance_frequency=rebalance_frequency,
-    )
-
-    evaluation_index = strategy_backtest.portfolio_returns.index
-    daily_returns = pd.DataFrame(
-        {
-            "PCA factor + LightGBM": strategy_backtest.portfolio_returns,
-            "Equal-weight XLE constituents": asset_returns.loc[evaluation_index].mean(
-                axis=1
-            ),
-            "XLE baseline": baseline_returns.loc[evaluation_index],
-        }
-    )
-    return XLEExperimentResult(
-        daily_returns=daily_returns,
-        cumulative_returns=(1.0 + daily_returns).cumprod(),
-        performance_metrics=summarize_performance(
-            daily_returns, risk_free_rate=risk_free_rate
-        ),
-        implementation_metrics=summarize_implementation(
-            {"PCA factor + LightGBM": strategy_backtest}
-        ),
-        strategy_backtest=strategy_backtest,
     )
 
 

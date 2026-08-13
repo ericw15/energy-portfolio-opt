@@ -1,4 +1,4 @@
-from .covariance import ewma_covariance, ledoit_wolf_covariance
+from .covariance import ewma_covariance
 from .portfolio import Portfolio_Strategy
 
 
@@ -22,13 +22,6 @@ class Rolling_Markowitz_Portfolio(Markowitz_Portfolio):
         if len(equity_data) < self.rolling_days:
             raise ValueError("equity_data must contain rolling_days observations")
         return equity_data.iloc[-self.rolling_days :].mean()
-
-
-class Ledoit_Wolf_Portfolio(Markowitz_Portfolio):
-    """Historical-mean Markowitz portfolio with Ledoit--Wolf covariance."""
-
-    def get_covariance_matrix(self, start_date, end_date, equity_data):
-        return ledoit_wolf_covariance(equity_data)
 
 
 class EWMA_Portfolio(Markowitz_Portfolio):

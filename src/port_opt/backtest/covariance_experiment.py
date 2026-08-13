@@ -16,7 +16,6 @@ import pandas as pd
 from port_opt.strategy import (
     EWMA_Portfolio,
     EWMAPCA_Historical_Mean_Strategy,
-    Ledoit_Wolf_Portfolio,
     Markowitz_Portfolio,
     PCA_Historical_Mean_Strategy,
 )
@@ -64,7 +63,7 @@ def run_xle_covariance_experiment(
     """Run a common-protocol XLE covariance-construction comparison.
 
     The optimized strategies differ only in covariance construction: sample
-    covariance, ordinary PCA, Ledoit--Wolf, EWMA, and EWMA-PCA.
+    covariance, ordinary PCA, EWMA, and EWMA-PCA.
     ``ewma_half_life`` is measured in available trading observations. The two
     non-optimized comparison baselines are equal-weight constituents and XLE.
     """
@@ -83,9 +82,6 @@ def run_xle_covariance_experiment(
         ),
         "PCA covariance / Historical Means Sharpe": PCA_Historical_Mean_Strategy(
             risk_free_rate, num_principal_components
-        ),
-        "Ledoit-Wolf covariance / Historical Means Sharpe": Ledoit_Wolf_Portfolio(
-            risk_free_rate
         ),
         f"EWMA covariance ({ewma_half_life}-day half-life) / Historical Means Sharpe": EWMA_Portfolio(
             risk_free_rate, ewma_half_life

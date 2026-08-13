@@ -41,7 +41,6 @@ def test_covariance_study_is_walk_forward_and_adds_factor_candidate(
 
     expected_estimators = {
         "sample_covariance",
-        "ledoit_wolf_covariance",
         "pca_covariance",
         "pca_plus_factor_covariance",
         "ewma_covariance_half_life_10",

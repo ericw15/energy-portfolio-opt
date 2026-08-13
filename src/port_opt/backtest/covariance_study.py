@@ -15,7 +15,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 from port_opt.strategy import PCA_Commodity_Factor_Strategy, PCA_factor_Strategy
-from port_opt.strategy.covariance import ewma_covariance, ledoit_wolf_covariance
+from port_opt.strategy.covariance import ewma_covariance
 
 
 @dataclass(frozen=True)
@@ -36,7 +36,6 @@ def _estimator_display_order(name: str) -> tuple[int, int | str]:
     """Keep estimator families adjacent rather than ranking bars by one metric."""
     fixed_order = {
         "sample_covariance": 0,
-        "ledoit_wolf_covariance": 1,
         "pca_covariance": 3,
         "pca_plus_factor_covariance": 4,
     }
@@ -235,7 +234,6 @@ def run_covariance_estimator_study(
         training_mean = training_returns.mean().to_numpy()
         covariance_estimates: dict[str, pd.DataFrame] = {
             "sample_covariance": training_returns.cov(),
-            "ledoit_wolf_covariance": ledoit_wolf_covariance(training_returns),
             "pca_covariance": pca_strategy.get_covariance_matrix(
                 None, None, training_returns
             ),

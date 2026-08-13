@@ -4,18 +4,6 @@ from __future__ import annotations
 
 import numpy as np
 import pandas as pd
-from sklearn.covariance import LedoitWolf
-
-
-def ledoit_wolf_covariance(returns: pd.DataFrame) -> pd.DataFrame:
-    """Estimate a shrunk covariance matrix while retaining asset labels.
-
-    Ledoit--Wolf selects the shrinkage intensity from the supplied return panel.
-    It does not use any observations outside that panel.
-    """
-    values = returns.astype(float)
-    covariance = LedoitWolf().fit(values).covariance_
-    return pd.DataFrame(covariance, index=values.columns, columns=values.columns)
 
 
 def ewma_covariance(returns: pd.DataFrame, half_life: int) -> pd.DataFrame:

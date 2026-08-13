@@ -1,11 +1,8 @@
-from typing import Sequence
-
 import numpy as np
 import pandas as pd
 from sklearn.decomposition import PCA
 from sklearn.linear_model import LinearRegression
 
-from .expected_returns import DEFAULT_FEATURE_WINDOWS, get_lightgbm_ER
 from .portfolio import Portfolio_Strategy
 
 
@@ -50,34 +47,6 @@ class PCA_factor_Strategy(Portfolio_Strategy):
         )
         return pd.DataFrame(
             asset_covariance_matrix, index=returns.columns, columns=returns.columns
-        )
-
-
-class PCA_LightGBM_Strategy(PCA_factor_Strategy):
-    """Original PCA covariance prototype paired with its LightGBM return forecast."""
-
-    def __init__(
-        self,
-        risk_free_rate: float,
-        window_size: int = 30,
-        num_boost_round: int = 100,
-        min_train_samples: int = 20,
-        num_principal_components: int | None = None,
-        feature_windows: Sequence[int] = DEFAULT_FEATURE_WINDOWS,
-    ):
-        super().__init__(risk_free_rate, num_principal_components)
-        self.window_size = window_size
-        self.num_boost_round = num_boost_round
-        self.min_train_samples = min_train_samples
-        self.feature_windows = feature_windows
-
-    def get_expected_returns(self, start_date, end_date, equity_data):
-        return get_lightgbm_ER(
-            equity_data,
-            window_size=self.window_size,
-            num_boost_round=self.num_boost_round,
-            min_train_samples=self.min_train_samples,
-            feature_windows=self.feature_windows,
         )
 
 
