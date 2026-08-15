@@ -9,8 +9,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Sequence
 
 import matplotlib.pyplot as plt
+import numpy as np
 import pandas as pd
 
 from port_opt.strategy import (
@@ -34,6 +36,8 @@ from .xle_data import (
     select_backtest_panel,
 )
 
+DEFAULT_TAIL_LOSS_WEIGHTS = (1.0, 0.1, 0.01)
+
 
 @dataclass(frozen=True)
 class XLETailRiskExperimentResult:
@@ -46,6 +50,19 @@ class XLETailRiskExperimentResult:
     strategy_backtests: dict[str, BacktestResult]
 
 
+def _validate_tail_loss_weights(
+    tail_loss_weights: Sequence[float],
+) -> tuple[float, ...]:
+    weights = tuple(float(weight) for weight in tail_loss_weights)
+    if not weights:
+        raise ValueError("tail_loss_weights must not be empty")
+    if not np.isfinite(weights).all():
+        raise ValueError("tail_loss_weights must contain only finite values")
+    if len(set(weights)) != len(weights):
+        raise ValueError("tail_loss_weights must not contain duplicates")
+    return weights
+
+
 def run_xle_tail_risk_experiment(
     *,
     training_start: str = "2021-01-01",
@@ -56,18 +73,29 @@ def run_xle_tail_risk_experiment(
     risk_free_rate: float = 0.04 / 252,
     num_principal_components: int | None = None,
     cvar_percentile: float = 0.95,
-    tail_loss_weight: float = 1.0,
+    tail_loss_weights: Sequence[float] = DEFAULT_TAIL_LOSS_WEIGHTS,
+    tail_loss_weight: float | None = None,
     max_download_attempts: int = 3,
     retry_delay_seconds: float = 1.0,
 ) -> XLETailRiskExperimentResult:
     """Compare ordinary and tail-adjusted PCA maximum-Sharpe portfolios.
 
-    The ordinary strategy maximizes ``(w' mu - r_f) / sigma(w)``. The
+    The ordinary strategy maximizes (w' mu - r_f) / sigma(w). Each
     tail-adjusted strategy instead maximizes
-    ``(w' mu - r_f) / (sigma(w) + lambda L_alpha(w))``. Here ``L_alpha(w)``
-    is positive empirical expected tail loss of in-sample portfolio returns,
-    ``alpha`` is ``cvar_percentile``, and ``lambda`` is ``tail_loss_weight``.
+    (w' mu - r_f) / (sigma(w) + lambda L_alpha(w)), using one lambda from
+    tail_loss_weights. L_alpha(w) is positive empirical expected tail loss of
+    in-sample portfolio returns and alpha is cvar_percentile. The singular
+    tail_loss_weight argument remains a compatibility override for running
+    exactly one tail-adjusted candidate.
     """
+    if tail_loss_weight is not None:
+        if tuple(tail_loss_weights) != DEFAULT_TAIL_LOSS_WEIGHTS:
+            raise ValueError(
+                "pass either tail_loss_weight or tail_loss_weights, not both"
+            )
+        selected_tail_loss_weights = _validate_tail_loss_weights((tail_loss_weight,))
+    else:
+        selected_tail_loss_weights = _validate_tail_loss_weights(tail_loss_weights)
     asset_returns, baseline_returns = load_xle_returns(
         training_start,
         end_date,
@@ -81,12 +109,15 @@ def run_xle_tail_risk_experiment(
         "PCA covariance / Maximum Sharpe": PCA_Historical_Mean_Strategy(
             risk_free_rate, num_principal_components
         ),
-        f"PCA covariance / Tail-adjusted Sharpe (lambda={tail_loss_weight:g})": TailAdjustedSharpePCA_Historical_Mean_Strategy(
-            risk_free_rate,
-            tail_loss_weight=tail_loss_weight,
-            cvar_percentile=cvar_percentile,
-            num_principal_components=num_principal_components,
-        ),
+        **{
+            f"PCA covariance / Tail-adjusted Sharpe (lambda={weight:g})": TailAdjustedSharpePCA_Historical_Mean_Strategy(
+                risk_free_rate,
+                tail_loss_weight=weight,
+                cvar_percentile=cvar_percentile,
+                num_principal_components=num_principal_components,
+            )
+            for weight in selected_tail_loss_weights
+        },
     }
     strategy_backtests = run_labelled_strategies(
         backtest_panel,

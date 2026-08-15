@@ -38,6 +38,8 @@ def test_tail_risk_experiment_isolates_objective_and_writes_growth(
     assert result.daily_returns.columns.tolist() == [
         "PCA covariance / Maximum Sharpe",
         "PCA covariance / Tail-adjusted Sharpe (lambda=1)",
+        "PCA covariance / Tail-adjusted Sharpe (lambda=0.1)",
+        "PCA covariance / Tail-adjusted Sharpe (lambda=0.01)",
         "Equal-weight XLE constituents",
         "XLE baseline",
     ]
@@ -45,7 +47,7 @@ def test_tail_risk_experiment_isolates_objective_and_writes_growth(
         result.performance_metrics.index.tolist()
         == result.daily_returns.columns.tolist()
     )
-    assert len(result.implementation_metrics) == 2
+    assert len(result.implementation_metrics) == 4
     paths = tail_risk_experiment.save_xle_tail_risk_experiment_visuals(
         result, tmp_path / "outputs"
     )

@@ -1,0 +1,2 @@
+comparison,strategy,benchmark,observations,mean_daily_active_return,annualized_active_return,hac_lag,hac_standard_error,test_statistic,confidence_level,confidence_interval_lower,confidence_interval_upper,two_sided_p_value
+EWMA-PCA covariance versus PCA covariance,EWMA-PCA covariance (63-day half-life) / Historical Means Sharpe,PCA covariance / Historical Means Sharpe,647.0,-1.1469957949948991e-05,-0.0028904294033871457,20.0,9.776788115321688e-05,-0.11731826254855471,0.95,-0.0002030914838550464,0.0001801515679551484,0.9066078535436267
