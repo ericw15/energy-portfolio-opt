@@ -3,7 +3,7 @@
 > A small, transparent codebase for testing how portfolio-construction choices
 > behave in a fixed set of energy equities.
 
-This is a starting point for comparing a few ideas, it is not a claim to have found an investable edge.
+This is a starting point for comparing a few ideas, it is not a claim to have found an investable edge. Read the RESEARCH_REPORT.md for an example report of findings.
 
 ## Start here
 
