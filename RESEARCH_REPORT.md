@@ -242,9 +242,9 @@ $V_K$, and reconstructs
 $$
 \hat\Sigma_{\mathrm{EWMA\text{-}PCA}}
 =V_K\Lambda_KV_K^\top+
-\mathrm{diag}\!\left(
+\mathrm{diag}(
 \mathrm{diag}(\hat\Sigma_{\mathrm{EWMA}}-V_K\Lambda_KV_K^\top)
-\right).
+).
 $$
 
 In this way, recency weighting applies to the principal directions, their variances,
@@ -259,8 +259,8 @@ $r_{p,t}(w)=w^\top r_t$, let $Q_{.05}(w)$ be the empirical fifth percentile
 of in-sample portfolio returns and define positive expected tail loss as
 
 $$
-L_{.95}(w)=-\mathrm{mean}\left\{r_{p,t}(w):
-r_{p,t}(w)\le Q_{.05}(w)\right\}.
+L_{.95}(w)=-\mathrm{mean}\{r_{p,t}(w):
+r_{p,t}(w)\le Q_{.05}(w)\}.
 $$
 
 The experiment maximizes
