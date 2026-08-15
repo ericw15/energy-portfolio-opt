@@ -112,7 +112,7 @@ weight-drift model. Reported performance is therefore gross of trading costs.
 Turnover is target turnover, excluding the initial funding allocation:
 
 $$
-\operatorname{turnover}_j=\frac12\sum_{i=1}^{N}|w_{i,j}-w_{i,j-1}|.
+\mathrm{turnover}_j=\frac12\sum_{i=1}^{N}|w_{i,j}-w_{i,j-1}|.
 $$
 
 The expected-return estimate is deliberately simple and common across all
@@ -191,7 +191,7 @@ estimate is
 $$
 \hat\Sigma_{\mathrm{PCA}}
 =B\hat\Sigma_F B^\top+
-\operatorname{diag}(\hat\sigma^2_{\varepsilon,1},\ldots,
+\mathrm{diag}(\hat\sigma^2_{\varepsilon,1},\ldots,
 \hat\sigma^2_{\varepsilon,N}).
 $$
 
@@ -242,8 +242,8 @@ $V_K$, and reconstructs
 $$
 \hat\Sigma_{\mathrm{EWMA\text{-}PCA}}
 =V_K\Lambda_KV_K^\top+
-\operatorname{diag}\!\left(
-\operatorname{diag}(\hat\Sigma_{\mathrm{EWMA}}-V_K\Lambda_KV_K^\top)
+\mathrm{diag}\!\left(
+\mathrm{diag}(\hat\Sigma_{\mathrm{EWMA}}-V_K\Lambda_KV_K^\top)
 \right).
 $$
 
@@ -259,7 +259,7 @@ $r_{p,t}(w)=w^\top r_t$, let $Q_{.05}(w)$ be the empirical fifth percentile
 of in-sample portfolio returns and define positive expected tail loss as
 
 $$
-L_{.95}(w)=-\operatorname{mean}\left\{r_{p,t}(w):
+L_{.95}(w)=-\mathrm{mean}\left\{r_{p,t}(w):
 r_{p,t}(w)\le Q_{.05}(w)\right\}.
 $$
 
