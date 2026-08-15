@@ -60,3 +60,7 @@ DEVELOPMENT_NOTES.md            code structure and research conventions
 
 For contributors and future experiments, see
 [development notes](DEVELOPMENT_NOTES.md).
+
+## AI Usage
+
+I implemented a chunk of the beginning markowitz and PCA logic myself as an exercise to better understand how statistical factor construction worked. I did a chunk of the backtesting framework but had AI refactor a few items. In general, I used codex to generate a good amount of code here but generally reviewed changes as I went and only asked/implemented a single thing at a time (no multi-agent stuff).
