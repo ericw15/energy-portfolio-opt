@@ -1,0 +1,2 @@
+comparison,strategy,benchmark,observations,mean_daily_active_return,annualized_active_return,hac_lag,hac_standard_error,test_statistic,confidence_level,confidence_interval_lower,confidence_interval_upper,two_sided_p_value
+PCA + commodity factors versus PCA,PCA + U.S. commodity factors / Historical Means Sharpe,PCA factor / Historical Means Sharpe,647.0,3.22437001863074e-06,0.0008125412446949464,20.0,6.974262267053194e-06,0.462324170667175,0.95,-1.0444932843530188e-05,1.689367288079167e-05,0.6438488688849489
