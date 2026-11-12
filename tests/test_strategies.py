@@ -39,6 +39,56 @@ def test_markowitz_strategy_is_a_walk_forward_weight_estimator(returns):
     assert len(result.portfolio_returns) == 140
     assert result.weights.columns.tolist() == returns.columns.tolist()
     assert np.allclose(result.weights.sum(axis=1), 1.0)
+    assert len(result.optimization_audit) == len(result.records)
+    assert result.optimization_audit.certified.all()
+
+
+def test_maximum_sharpe_uses_the_global_convex_reformulation():
+    strategy = Markowitz_Portfolio(risk_free_rate=0.0)
+    covariance = np.array([[0.04, 0.0], [0.0, 0.01]])
+    expected_returns = np.array([0.08, 0.03])
+
+    result = strategy.optimize_towards_sharpe_ratio(
+        covariance, expected_returns, ["A", "B"]
+    )
+
+    assert result.success
+    assert result.optimization_diagnostic.certified
+    assert result.optimization_diagnostic.optimality_gap == 0.0
+    assert result.x == pytest.approx([0.4, 0.6], abs=1e-7)
+
+
+def test_tail_adjusted_sharpe_matches_a_dense_two_asset_grid():
+    strategy = Markowitz_Portfolio(risk_free_rate=0.0)
+    covariance = np.array([[0.04, 0.0], [0.0, 0.01]])
+    expected_returns = np.array([0.08, 0.03])
+    returns = pd.DataFrame(
+        {"A": [-0.10, 0.03, 0.02, 0.01], "B": [0.01, -0.02, 0.01, 0.01]}
+    )
+
+    result = strategy.optimize_towards_tail_adjusted_sharpe_ratio(
+        covariance,
+        expected_returns,
+        returns,
+        ["A", "B"],
+        tail_loss_weight=1.0,
+        cvar_percentile=0.95,
+    )
+
+    grid_weights = np.linspace(0.0, 1.0, 10_001)
+    grid_scores = []
+    for weight_a in grid_weights:
+        weights = np.array([weight_a, 1.0 - weight_a])
+        tail_loss = max(
+            0.0,
+            -strategy.get_cvar_percentile(weights, returns, cvar_percentile=0.95),
+        )
+        volatility = np.sqrt(weights @ covariance @ weights)
+        grid_scores.append((weights @ expected_returns) / (volatility + tail_loss))
+
+    assert result.success
+    assert result.optimization_diagnostic.certified
+    assert -result.fun >= max(grid_scores) - 2e-4
 
 
 def test_rolling_markowitz_uses_only_its_last_rolling_window(returns):

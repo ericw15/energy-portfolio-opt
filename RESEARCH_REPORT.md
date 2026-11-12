@@ -1,7 +1,7 @@
 ---
 title: "Experiments in Energy Portfolio Optimization with Factor Modeling"
 author: "Eric Wolos"
-date: "August 2026"
+date: "November 2026"
 ---
 
 # Experiments in Energy Portfolio Optimization with Factor Modeling
@@ -132,8 +132,8 @@ The daily risk-free input has been chosen as $0.04/252$.
 The figures report annualized geometric return, annualized volatility, Sharpe and
 Sortino ratios, maximum drawdown, and empirical 5% expected shortfall. If
 $r_{p,t}$ is a portfolio's daily return, the empirical expected shortfall is
-the average return among days at or below the sample fifth percentile. It does
-not assume normally distributed returns.
+the average of the worst 5% of returns, with fractional weight on the boundary
+observation when needed. It does not assume normally distributed returns.
 
 For the two comparisons specified before inspecting the final tables, the test
 uses paired active returns
@@ -169,7 +169,10 @@ $$
 $$
 
 This is the common construction in all three main themes unless the covariance
-or denominator is deliberately replaced. The implementation is in
+or denominator is deliberately replaced. With positive excess expected returns,
+the rescaling $y=w/(w^\top\hat\mu-r_f)$ converts the problem to the convex
+quadratic program $\min_y y^\top\hat\Sigma y$ subject to
+$(\hat\mu-r_f\mathbf1)^\top y=1$ and $y\ge0$. The implementation is in
 [`portfolio.py`](src/port_opt/strategy/portfolio.py) and
 [`markowitz.py`](src/port_opt/strategy/markowitz.py).
 
@@ -274,7 +277,10 @@ $$
 Both denominator terms are daily-return quantities. $\lambda$ is a
 dimensionless tuning parameter. Setting $\lambda=0$ recovers ordinary Sharpe.
 This is inspired by the general idea of expected-shortfall/CVaR risk measurement, associated with
-[Rockafellar and Uryasev (2000)](https://uryasev.ams.stonybrook.edu/publications/). It is **not the canonical minimum-CVaR program**. It is a nonlinear penalized Sharpe objective and there are simply other, more mature CVaR optimization methods.
+[Rockafellar and Uryasev (2000)](https://uryasev.ams.stonybrook.edu/publications/). It is not the canonical minimum-CVaR program. Its denominator is nevertheless convex in $w$, so the positive-ratio problem is globally solved by Dinkelbach iterations, each of which is a convex optimization problem.
+
+Solver status and objective bounds are retained for each rebalance in the
+standard experiment outputs.
 
 ## 4. Development choice: retaining one principal component
 
@@ -286,11 +292,11 @@ the PCA construction, not evidence that PCA is better than either baseline.
 
 | Retained PCs | Annualized geometric return | Sharpe | Maximum drawdown | 5% expected shortfall | Annualized turnover |
 | ---: | ---: | ---: | ---: | ---: | ---: |
-| 1 | 44.5% | 1.051 | -32.8% | -5.30% | 298.3% |
-| 2 | 44.0% | 1.043 | -32.9% | -5.29% | 298.8% |
-| 3 | 42.3% | 1.010 | -32.9% | -5.31% | 292.9% |
-| 4 | 42.4% | 1.013 | -32.9% | -5.30% | 299.9% |
-| 5 | 42.6% | 1.017 | -32.9% | -5.30% | 300.8% |
+| 1 | 45.2% | 1.062 | -32.9% | -5.30% | 297.1% |
+| 2 | 44.4% | 1.049 | -32.9% | -5.29% | 297.5% |
+| 3 | 42.6% | 1.015 | -32.9% | -5.31% | 296.2% |
+| 4 | 42.8% | 1.019 | -32.9% | -5.30% | 302.3% |
+| 5 | 42.8% | 1.019 | -32.9% | -5.30% | 304.0% |
 
 One component had the highest geometric return and Sharpe ratio within this
 PCA grid. The differences in the tail metrics were very small, and two components had the marginally less-negative expected shortfall.
@@ -301,7 +307,7 @@ main themes. Selecting $K$ on the prior period avoids choosing it directly on
 the reported 2024–2026 results, although a single development period is still a
 weak basis for broad generalization.
 
-![Development-period PCA-component comparison](research_outputs/pca-dimension/growth-comparison.png)
+![Development-period PCA-component comparison](research_outputs/report-results/pca-dimension/growth-comparison.png)
 
 *Figure 1. Development-only growth comparison for one through five PCA
 components, with the two baseline reference portfolios. The later experiments
@@ -319,14 +325,14 @@ baselines. The results below cover the common 647-day final evaluation sample.
 
 | Construction | Cumulative return | Geometric return | Volatility | Sharpe | Maximum drawdown | 5% expected shortfall |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| PCA | 111.0% | 33.8% | 25.3% | 1.119 | -20.4% | -3.86% |
-| PCA + commodity factors | 111.4% | 33.9% | 25.4% | 1.118 | -20.4% | -3.87% |
+| PCA | 111.1% | 33.8% | 25.3% | 1.118 | -20.4% | -3.86% |
+| PCA + commodity factors | 111.4% | 33.8% | 25.4% | 1.118 | -20.4% | -3.87% |
 | Commodity factors only | 88.0% | 27.9% | 23.5% | 0.997 | -19.4% | -3.55% |
-| Sample-covariance Markowitz | 101.5% | 31.4% | 26.7% | 1.007 | -24.4% | -4.12% |
+| Sample-covariance Markowitz | 101.1% | 31.3% | 26.7% | 1.003 | -24.5% | -4.12% |
 | Equal-weight constituents | 59.9% | 20.1% | 24.5% | 0.706 | -26.0% | -3.52% |
 | XLE baseline | 53.8% | 18.2% | 22.0% | 0.691 | -20.1% | -3.27% |
 
-![Factor-construction growth comparison](research_outputs/factor/growth-comparison.png)
+![Factor-construction growth comparison](research_outputs/report-results/factor/growth-comparison.png)
 
 *Figure 2. Gross growth of one unit of capital under the factor-construction
 comparisons. The PCA and PCA-plus-commodity paths are close throughout the
@@ -342,16 +348,16 @@ for a meaningful part of co-movement but not all of the dependence captured by
 the statistical factor construction. This visual and model-based evidence could
 be extended by estimating the share of variance explained.
 
-![PCA versus commodity-only covariance estimates](research_outputs/factor/commodity-only-covariance-comparison.png)
+![PCA versus commodity-only covariance estimates](research_outputs/report-results/factor/commodity-only-covariance-comparison.png)
 
 *Figure 3. Asset covariance estimates at the selected 2023-12-29 rebalance date.
 Each panel uses the figure's common scale. The commodity-only construction is
 structurally different from PCA, particularly in off-diagonal covariance.*
 
 The implementation table reinforces that distinction. Commodity-only factors
-produced a lower mean maximum asset weight (35.5% versus about 55% for the PCA
+produced a lower mean maximum asset weight (35.4% versus about 55% for the PCA
 variants) and a larger effective number of assets (3.86 versus about 2.34), with
-similar annualized target turnover (134.8% versus 137.2% and 138.8%). This more
+similar annualized target turnover (134.4% versus 137.2% and 137.6%). This more
 diversified construction had lower realized volatility and milder drawdown and
 expected shortfall, but lower return and Sharpe. It may serve as an interesting trade-off.
 
@@ -362,10 +368,10 @@ combined and PCA-only portfolios. The estimated active mean is
 
 | Comparison | Observations | Annualized mean active return | HAC lag | Two-sided p-value |
 | --- | ---: | ---: | ---: | ---: |
-| PCA + commodity factors minus PCA | 647 | +0.10% | 20 | 0.570 |
+| PCA + commodity factors minus PCA | 647 | +0.08% | 20 | 0.644 |
 
-The 95% HAC interval for the *daily* active mean is $-0.000965\%$ to
-$+0.001751\%$. The result is compatible with a small positive, zero, or small
+The 95% HAC interval for the *daily* active mean is $-0.001044\%$ to
+$+0.001689\%$. The result is compatible with a small positive, zero, or small
 negative mean contribution from adding these three commodity series. It does not
 support a claim that commodity augmentation raises average daily return in this
 sample. The tiny difference in total cumulative return should be read in that
@@ -382,12 +388,12 @@ EWMA-PCA. The EWMA half-life is 63 trading observations.
 
 | Covariance estimator | Cumulative return | Geometric return | Volatility | Sharpe | Maximum drawdown | 5% expected shortfall |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| Sample covariance | 103.6% | 31.9% | 26.6% | 1.025 | -24.3% | -4.09% |
-| PCA | 110.7% | 33.7% | 25.3% | 1.117 | -20.5% | -3.86% |
-| EWMA | 99.8% | 31.0% | 26.1% | 1.014 | -24.8% | -3.99% |
-| EWMA-PCA | 110.0% | 33.5% | 24.6% | 1.135 | -19.2% | -3.75% |
+| Sample covariance | 104.0% | 32.0% | 26.6% | 1.027 | -24.1% | -4.10% |
+| PCA | 110.6% | 33.7% | 25.3% | 1.116 | -20.5% | -3.86% |
+| EWMA | 99.9% | 31.0% | 26.1% | 1.014 | -24.8% | -3.99% |
+| EWMA-PCA | 109.7% | 33.4% | 24.6% | 1.133 | -19.2% | -3.75% |
 
-![Covariance-construction risk and return comparison](research_outputs/covariance/risk-return-comparison.png)
+![Covariance-construction risk and return comparison](research_outputs/report-results/covariance/risk-return-comparison.png)
 
 *Figure 4. Risk and return measures for the four covariance constructions and
 the two baselines. EWMA-PCA has the strongest realized Sharpe, Sortino,
@@ -395,11 +401,11 @@ drawdown, and 5% expected-shortfall values among the optimized variants, while
 plain PCA has the slightly higher geometric return.*
 
 EWMA-PCA also changes the portfolio's implementation profile. Its mean maximum
-weight is 48.9% and its effective number of assets is 2.64, compared with 54.9%
+weight is 48.8% and its effective number of assets is 2.64, compared with 54.8%
 and 2.36 for PCA. This is less concentrated, but not costless: annualized target
-turnover rises from 133.9% to 171.0%. Pure EWMA turns over the most at 267.1%.
+turnover rises from 134.1% to 171.2%. Pure EWMA turns over the most at 262.5%.
 
-![Covariance-construction implementation comparison](research_outputs/covariance/implementation-comparison.png)
+![Covariance-construction implementation comparison](research_outputs/report-results/covariance/implementation-comparison.png)
 
 *Figure 5. Target-turnover and concentration comparison for optimized covariance
 variants. This figure matters because a change in covariance estimator affects
@@ -420,9 +426,9 @@ The pre-specified test assesses mean daily return, not the risk metrics above.
 
 | Comparison | Observations | Annualized mean active return | HAC lag | Two-sided p-value |
 | --- | ---: | ---: | ---: | ---: |
-| EWMA-PCA minus PCA | 647 | -0.29% | 20 | 0.907 |
+| EWMA-PCA minus PCA | 647 | -0.35% | 20 | 0.886 |
 
-The daily-mean 95% HAC interval is $-0.02031\%$ to $+0.01802\%$. Thus,
+The daily-mean 95% HAC interval is $-0.02035\%$ to $+0.01757\%$. Thus,
 the higher realized Sharpe and improved drawdown of EWMA-PCA should not be
 presented as evidence of a higher expected mean return. A more restrained reading
 is that exponential weighting produced a different, less concentrated portfolio
@@ -441,12 +447,12 @@ sensitivity check, not a pre-specified calibration study.
 
 | Objective | Cumulative return | Geometric return | Volatility | Sharpe | Sortino | Maximum drawdown | 5% expected shortfall |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| Maximum Sharpe | 110.7% | 33.7% | 25.3% | 1.117 | 1.533 | -20.5% | -3.86% |
-| Tail-adjusted Sharpe, $\lambda=1$ | 99.0% | 30.7% | 26.0% | 1.009 | 1.368 | -22.4% | -4.03% |
-| Tail-adjusted Sharpe, $\lambda=0.1$ | 108.0% | 33.0% | 25.5% | 1.091 | 1.495 | -20.6% | -3.89% |
-| Tail-adjusted Sharpe, $\lambda=0.01$ | 110.0% | 33.5% | 25.3% | 1.111 | 1.525 | -20.5% | -3.86% |
+| Maximum Sharpe | 110.6% | 33.7% | 25.3% | 1.116 | 1.532 | -20.5% | -3.86% |
+| Tail-adjusted Sharpe, $\lambda=1$ | 97.5% | 30.4% | 26.0% | 0.998 | 1.353 | -22.7% | -4.03% |
+| Tail-adjusted Sharpe, $\lambda=0.1$ | 107.6% | 32.9% | 25.5% | 1.089 | 1.491 | -20.6% | -3.89% |
+| Tail-adjusted Sharpe, $\lambda=0.01$ | 110.1% | 33.5% | 25.3% | 1.112 | 1.525 | -20.5% | -3.86% |
 
-![Tail-risk objective risk and return comparison](research_outputs/tail-risk/risk-return-comparison.png)
+![Tail-risk objective risk and return comparison](research_outputs/report-results/tail-risk/risk-return-comparison.png)
 
 *Figure 6. At $\lambda=1$, the tail-adjusted objective is worse across the
 reported return and downside metrics. The $\lambda=0.1$ and $0.01$ candidates
@@ -454,13 +460,13 @@ are close to ordinary maximum Sharpe but do not provide a clearer realized
 downside benefit.*
 
 The grid does not merely return the same weights. At $\lambda=1$, annualized
-target turnover rises from 133.9% to 222.1%, mean maximum weight rises from
-54.8% to 62.2%, and the strategy reaches a 100% single-asset target allocation
+target turnover rises from 134.1% to 229.4%, mean maximum weight rises from
+54.8% to 64.1%, and the strategy reaches a 100% single-asset target allocation
 at least once. The smaller weights change the portfolio less. At
-$\lambda=0.01$, turnover is 136.1%, mean maximum weight is 55.0%, and the
+$\lambda=0.01$, turnover is 135.9%, mean maximum weight is 55.0%, and the
 effective number of assets is almost unchanged at 2.36.
 
-![Tail-risk objective implementation comparison](research_outputs/tail-risk/implementation-comparison.png)
+![Tail-risk objective implementation comparison](research_outputs/report-results/tail-risk/implementation-comparison.png)
 
 *Figure 7. The $\lambda=1$ objective changes turnover and concentration
 materially. The lower-weight candidates are progressively closer to maximum
@@ -468,7 +474,7 @@ Sharpe, as expected when the tail-loss term has less influence.*
 
 ### 7.2 Interpretation
 
-The result says that this particular nonlinear objective did not improve
+The result says that this particular fractional objective did not improve
 realized downside outcomes in this 647-day period. The $\lambda=1$ candidate
 was clearly worse by the stated measures. The smaller penalties were close to
 ordinary maximum Sharpe. The $\lambda=0.01$ candidate had nearly the same
@@ -483,7 +489,7 @@ particular penalized objective.
 Several explanations are plausible but untested here:
 
 - A 5% tail statistic in a 504-observation window is based on roughly 25 tail
-  days, so its portfolio ranking can be noisy and discontinuous as weights vary.
+  days, so its portfolio ranking can be noisy and nonsmooth as weights vary.
 - The penalty is added to volatility, rather than solving a standard minimum-CVaR
   or constrained-CVaR program. The chosen $\lambda$ is not calibrated to a
   stakeholder loss budget or selected on a prior development period.

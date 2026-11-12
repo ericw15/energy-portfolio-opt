@@ -67,6 +67,7 @@ def test_covariance_experiment_runs_all_estimators_and_only_writes_growth(
         "growth_comparison",
         "performance_metrics",
         "implementation_metrics",
+        "optimization_audit",
         "risk_return_comparison",
         "implementation_comparison",
         "statistical_tests",

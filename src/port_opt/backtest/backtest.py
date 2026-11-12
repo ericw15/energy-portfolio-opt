@@ -40,6 +40,7 @@ class RebalanceRecord:
     out_of_sample_start: pd.Timestamp
     out_of_sample_end: pd.Timestamp
     weights: pd.Series
+    optimization_diagnostic: dict[str, object] | None = None
 
 
 @dataclass(frozen=True)
@@ -55,6 +56,20 @@ class BacktestResult:
     def wealth_index(self) -> pd.Series:
         """Growth of one unit of capital, before costs."""
         return (1.0 + self.portfolio_returns).cumprod()
+
+    @property
+    def optimization_audit(self) -> pd.DataFrame:
+        """Return solver evidence for each rebalance that supplied it."""
+        rows = []
+        for record in self.records:
+            if record.optimization_diagnostic is not None:
+                rows.append(
+                    {
+                        "rebalance_date": record.rebalance_date,
+                        **record.optimization_diagnostic,
+                    }
+                )
+        return pd.DataFrame(rows)
 
     def sharpe_ratio(
         self, risk_free_rate: float = 0.0, periods_per_year: int = 252
@@ -157,6 +172,13 @@ def run_walk_forward_backtest(
                 in_sample.copy(), in_sample_factors.copy()
             )
         weights = _validate_weights(estimated_weights, returns.columns, long_only)
+        strategy = getattr(weight_estimator, "__self__", None)
+        diagnostic = getattr(strategy, "last_optimization_diagnostic", None)
+        diagnostic_record: dict[str, object] | None = None
+        if diagnostic is not None:
+            as_record = getattr(diagnostic, "as_record", None)
+            if callable(as_record):
+                diagnostic_record = dict(as_record())
 
         portfolio_parts.append(holding_returns @ weights)
         weight_parts.append(
@@ -180,6 +202,7 @@ def run_walk_forward_backtest(
                 out_of_sample_start=holding_returns.index[0],
                 out_of_sample_end=holding_returns.index[-1],
                 weights=weights.copy(),
+                optimization_diagnostic=diagnostic_record,
             )
         )
         previous_weights = weights

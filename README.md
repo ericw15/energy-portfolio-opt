@@ -38,6 +38,12 @@ Each compares optimized portfolios with equal-weight constituents and XLE.
 The code is useful for learning, extending a walk-forward backtest, or making a
 careful side-by-side comparison of portfolio rules.
 
+## Optimization
+
+Maximum-Sharpe portfolios are solved with a global convex formulation. The
+tail-adjusted experiment uses a globally solved CVaR-penalized formulation.
+Standard outputs include rebalance-level solver diagnostics.
+
 ## Read results with care
 
 These are intentionally narrow historical experiments: a static energy-equity
@@ -54,7 +60,7 @@ claims; this README deliberately does not repeat them.
 ```text
 src/port_opt/backtest/cli.py    command-line entry point
 src/port_opt/strategy/          portfolio and covariance implementations
-research_outputs/               generated charts and tables
+research_outputs/               generated charts, tables, and solver diagnostics
 DEVELOPMENT_NOTES.md            code structure and research conventions
 ```
 

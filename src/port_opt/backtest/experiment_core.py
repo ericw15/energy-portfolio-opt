@@ -23,6 +23,7 @@ class ExperimentOutputs:
     cumulative_returns: pd.DataFrame
     performance_metrics: pd.DataFrame
     implementation_metrics: pd.DataFrame
+    optimization_audit: pd.DataFrame
     strategy_backtests: dict[str, BacktestResult]
 
 
@@ -45,6 +46,33 @@ def run_labelled_strategies(
         )
         for label, estimator in estimators.items()
     }
+
+
+def build_optimization_audit(
+    strategy_backtests: Mapping[str, BacktestResult],
+) -> pd.DataFrame:
+    """Combine rebalance-level solver evidence for a labelled experiment."""
+    audit_frames = [
+        backtest.optimization_audit.assign(strategy=label)
+        for label, backtest in strategy_backtests.items()
+        if not backtest.optimization_audit.empty
+    ]
+    if audit_frames:
+        return pd.concat(audit_frames, ignore_index=True)
+    return pd.DataFrame(
+        columns=[
+            "rebalance_date",
+            "solver",
+            "status",
+            "objective_value",
+            "lower_bound",
+            "upper_bound",
+            "optimality_gap",
+            "certified",
+            "iterations",
+            "strategy",
+        ]
+    )
 
 
 def assemble_experiment_outputs(
@@ -75,6 +103,7 @@ def assemble_experiment_outputs(
             "XLE baseline": baseline_returns.loc[evaluation_index],
         }
     )
+    optimization_audit = build_optimization_audit(strategy_backtests)
     return ExperimentOutputs(
         daily_returns=daily_returns,
         cumulative_returns=(1.0 + daily_returns).cumprod(),
@@ -82,6 +111,7 @@ def assemble_experiment_outputs(
             daily_returns, risk_free_rate=risk_free_rate
         ),
         implementation_metrics=summarize_implementation(strategy_backtests),
+        optimization_audit=optimization_audit,
         strategy_backtests=strategy_backtests,
     )
 
@@ -95,6 +125,7 @@ def save_standard_summary_products(
     paths = {
         "performance_metrics": output_directory / "performance-metrics.csv",
         "implementation_metrics": output_directory / "implementation-metrics.csv",
+        "optimization_audit": output_directory / "optimization-audit.csv",
         "risk_return_comparison": output_directory / "risk-return-comparison.png",
         "implementation_comparison": output_directory / "implementation-comparison.png",
     }
@@ -106,4 +137,5 @@ def save_standard_summary_products(
     )
     outputs.performance_metrics.to_csv(paths["performance_metrics"])
     outputs.implementation_metrics.to_csv(paths["implementation_metrics"])
+    outputs.optimization_audit.to_csv(paths["optimization_audit"], index=False)
     return paths

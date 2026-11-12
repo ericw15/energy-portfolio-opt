@@ -55,6 +55,7 @@ def test_pca_dimension_experiment_compares_grid_and_writes_standard_products(
         "implementation_comparison",
         "performance_metrics",
         "implementation_metrics",
+        "optimization_audit",
     }
     assert all(path.exists() for path in paths.values())
 

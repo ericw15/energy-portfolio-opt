@@ -160,6 +160,7 @@ def test_historical_mean_experiment_compares_pca_and_markowitz(monkeypatch, tmp_
         "implementation_comparison",
         "performance_metrics",
         "implementation_metrics",
+        "optimization_audit",
         "statistical_tests",
         "histogram:PCA factor / Historical Means Sharpe",
         "histogram:PCA + U.S. commodity factors / Historical Means Sharpe",

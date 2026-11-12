@@ -41,6 +41,7 @@ def test_shared_experiment_core_aligns_strategies_and_writes_standard_products(
     assert set(paths) == {
         "performance_metrics",
         "implementation_metrics",
+        "optimization_audit",
         "risk_return_comparison",
         "implementation_comparison",
     }

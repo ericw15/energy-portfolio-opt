@@ -25,6 +25,7 @@ from .backtest import BacktestResult
 from .experiment_core import (
     ExperimentOutputs,
     assemble_experiment_outputs,
+    build_optimization_audit,
     run_labelled_strategies,
     save_standard_summary_products,
 )
@@ -281,6 +282,13 @@ def save_xle_experiment_visuals(
         cumulative_returns=result.cumulative_returns,
         performance_metrics=result.performance_metrics,
         implementation_metrics=result.implementation_metrics,
+        optimization_audit=build_optimization_audit(
+            {
+                label: backtest
+                for label, backtest in strategy_backtests.items()
+                if backtest is not None
+            }
+        ),
         strategy_backtests={
             label: backtest
             for label, backtest in strategy_backtests.items()

@@ -55,6 +55,7 @@ def test_tail_risk_experiment_isolates_objective_and_writes_growth(
         "growth_comparison",
         "performance_metrics",
         "implementation_metrics",
+        "optimization_audit",
         "risk_return_comparison",
         "implementation_comparison",
     }
